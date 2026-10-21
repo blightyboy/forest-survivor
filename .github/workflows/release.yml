@@ -1,0 +1,172 @@
+# Build Windows installer + portable and publish a GitHub Release.
+#
+# Triggers:
+#   1) Push a version tag:  git tag v0.1.21-alpha-build && git push origin v0.1.21-alpha-build
+#      Tag must match package.json version (optional leading "v").
+#   2) Actions → Release → Run workflow (uses package.json version; optional override).
+#
+# Artifacts (NSIS setup, portable exe, latest.yml) are uploaded so in-app
+# auto-update can find them.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.1.21-alpha-build). Leave empty to use package.json.'
+        required: false
+        type: string
+      draft:
+        description: 'Publish as draft (review before making public)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & publish (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Resolve release version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG_VER=$(node -p "require('./package.json').version")
+          INPUT_VER="${{ github.event.inputs.version || '' }}"
+          REF_NAME="${{ github.ref_name }}"
+
+          if [ -n "$INPUT_VER" ]; then
+            VER="${INPUT_VER#v}"
+          elif [[ "${{ github.event_name }}" == "push" && "$REF_NAME" == v* ]]; then
+            VER="${REF_NAME#v}"
+          else
+            VER="$PKG_VER"
+          fi
+
+          if [ -z "$VER" ]; then
+            echo "Could not resolve version" >&2
+            exit 1
+          fi
+
+          # Keep package.json + watermark in sync with the release tag.
+          node -e "
+            const fs = require('fs');
+            const ver = process.argv[1];
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = ver;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            let utils = fs.readFileSync('js/utils.js', 'utf8');
+            utils = utils.replace(/const BUILD_VERSION = '[^']*';/, \"const BUILD_VERSION = '\" + ver + \"';\");
+            fs.writeFileSync('js/utils.js', utils);
+            console.log('Synced version to', ver);
+          " "$VER"
+
+          # Prerelease if version has a semver prerelease / alpha-style suffix.
+          if echo "$VER" | grep -qiE -- '-(alpha|beta|rc|pre|dev|build)'; then
+            RELEASE_TYPE=prerelease
+          else
+            RELEASE_TYPE=release
+          fi
+          if [ "${{ github.event.inputs.draft || 'false' }}" = "true" ]; then
+            RELEASE_TYPE=draft
+          fi
+
+          # Point electron-builder GitHub publish at the right release kind.
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const pub = Array.isArray(pkg.build.publish) ? pkg.build.publish[0] : pkg.build.publish;
+            pub.releaseType = process.argv[1];
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            console.log('releaseType =', process.argv[1]);
+          " "$RELEASE_TYPE"
+
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          echo "release_type=$RELEASE_TYPE" >> "$GITHUB_OUTPUT"
+          echo "Resolved version=$VER tag=v$VER type=$RELEASE_TYPE"
+
+      - name: Verify tag matches version (tag pushes)
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="v${{ steps.ver.outputs.version }}"
+          ACTUAL="${{ github.ref_name }}"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "Tag '$ACTUAL' does not match package version tag '$EXPECTED'." >&2
+            echo "Bump package.json (and BUILD_VERSION) then retag, or use workflow_dispatch." >&2
+            exit 1
+          fi
+
+      - name: Commit version bump & ensure tag (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git diff --quiet -- package.json js/utils.js; then
+            git add package.json js/utils.js
+            git commit -m "chore: bump version to ${{ steps.ver.outputs.version }}"
+            git push origin HEAD
+            echo "Committed version bump"
+          fi
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+            echo "Created and pushed $TAG"
+          fi
+
+      - name: Build icon + publish Windows release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder also accepts GITHUB_TOKEN; set both for safety.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## Forest Survivor ${{ steps.ver.outputs.tag }}"
+            echo ""
+            echo "- Release type: \`${{ steps.ver.outputs.release_type }}\`"
+            echo "- Repo releases: https://github.com/${{ github.repository }}/releases"
+            echo "- Auto-update feed: \`latest.yml\` attached to the release (when publish succeeds)"
+          } >> "$GITHUB_STEP_SUMMARY"

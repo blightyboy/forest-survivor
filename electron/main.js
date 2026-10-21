@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const updater = require('./updater');
 
 const SAVE_NAME = 'save.json';
 
@@ -191,6 +192,15 @@ function createWindow() {
   Menu.setApplicationMenu(null);
   win.loadFile(path.join(__dirname, '..', 'index.html'));
 
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      updater.checkForUpdates(mainWindow).catch((err) => {
+        console.warn('[updater] check failed:', err && err.message);
+      });
+    }, 1200);
+  });
+
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });
@@ -228,6 +238,17 @@ app.whenReady().then(() => {
   ipcMain.on('display:apply', (event, settings) => {
     event.returnValue = applyDisplaySettings(settings || {});
   });
+
+  ipcMain.handle('update:check', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false, error: 'No window' };
+    }
+    return updater.checkForUpdates(mainWindow);
+  });
+  ipcMain.handle('update:download', async () => updater.startDownload());
+  ipcMain.handle('update:install', async () => updater.quitAndInstall());
+  ipcMain.handle('update:openRelease', async () => updater.openReleasePage());
+  ipcMain.handle('update:pending', async () => updater.getPending());
 
   createWindow();
 

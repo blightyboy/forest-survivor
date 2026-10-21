@@ -103,7 +103,8 @@ const TUTORIAL_CONTENT = {
     body:
       '<p>When you meet a threat, look for these markings:</p>' +
       '<ul>' +
-        '<li><b>Veterancy stars</b> — tougher HP, damage, and loot. More stars mean a veteran fight.</li>' +
+        '<li><b>Veterancy stars</b> — bronze (1–5), then silver (1–5), then gold (1–5). Higher tiers mean tougher fights and better loot.</li>' +
+        '<li><b>Variants</b> — <b>Dire</b> (darker brutes), <b>Necromantic</b> (undead green-gray), <b>Demonic</b> (red with spikes). Stronger than basic beasts.</li>' +
         '<li><b>Elements</b> — colored beasts lean on fire, water, nature, earth, light, or darkness. Matching your weapon element helps; theirs can resist yours.</li>' +
         '<li><b>Melee</b> — most animals charge and lunge up close.</li>' +
         '<li><b>Ranged</b> — sheep hurl wool and beavers throw logs while keeping their distance.</li>' +
@@ -166,6 +167,10 @@ class UI {
       tutorialBody: $('tutorialBody'),
       confirmOverlay: $('confirmOverlay'), confirmTitle: $('confirmTitle'),
       confirmMessage: $('confirmMessage'),
+      updateOverlay: $('updateOverlay'), updateTitle: $('updateTitle'),
+      updateMessage: $('updateMessage'), updateProgressWrap: $('updateProgressWrap'),
+      updateProgressFill: $('updateProgressFill'), updateProgressText: $('updateProgressText'),
+      updateHint: $('updateHint'),
       btnPause: $('btnPause'), btnRestart: $('btnRestart'), btnUpgrades: $('btnUpgrades'),
       btnSound: $('btnSound'), fpsText: $('fpsText'), runTimer: $('runTimer'),
       cardOverlay: $('cardOverlay'), cardRow: $('cardRow'), cardTitle: $('cardTitle'),
@@ -194,6 +199,8 @@ class UI {
     this.smithTab = false;
     this.panelOpen = window.innerWidth > 760;
     this.confirmAction = null;
+    this.updatePhase = null; // 'ask' | 'downloading' | 'ready'
+    this.updateInfo = null;
     this.restartArmed = false;
     this.restartTimer = 0;
     this.bannerTimer = 0;
@@ -205,6 +212,7 @@ class UI {
     this.buildUpgrades();
     this.bind();
     this.bindTooltips();
+    this.bindUpdater();
     this.applyPanel();
     this.setSoundIcon();
   }
@@ -240,6 +248,8 @@ class UI {
     onClick(this.el.btnMetaRefund, () => this.refundMetaUpgrades());
     onClick(document.getElementById('btnConfirmYes'), () => this.acceptConfirm());
     onClick(document.getElementById('btnConfirmNo'), () => this.cancelConfirm());
+    onClick(document.getElementById('btnUpdateYes'), () => this.acceptUpdate());
+    onClick(document.getElementById('btnUpdateNo'), () => this.dismissUpdate());
     document.querySelectorAll('.glossary-tab').forEach((tab) => {
       onClick(tab, () => this.setGlossaryTab(tab.dataset.glossary));
     });
@@ -380,7 +390,8 @@ class UI {
         tag: label + (elDef ? ' · ' + elDef.name : ''),
         desc: it.desc,
         extra: '',
-        color: elDef ? elDef.color : it.color,
+        // Border / title use rarity color; element is called out in the tag.
+        color: it.color || '#c9a227',
       };
     }
     if (kind === 'elem') {
@@ -498,12 +509,15 @@ class UI {
         return '<div class="tip-compare-col"><div class="tip-compare-lab">' + label + '</div>' +
           '<div class="tip-compare-empty">Empty slot</div></div>';
       }
+      // Match shop / equipped: rarity colors the quality name; element is separate.
+      const rarity = it.color || '#c9a227';
+      const elBit = elDef
+        ? '<br><span style="color:' + elDef.color + '">' + elDef.name + ' element</span>'
+        : '';
       return '<div class="tip-compare-col"><div class="tip-compare-lab">' + label + '</div>' +
-        '<div class="tip-compare-name" style="color:' + (elDef ? elDef.color : it.color) + '">' +
-          it.qualityName + ' ' + it.name + '</div>' +
-        '<div class="tip-compare-stats">' + it.desc +
-          (elDef ? '<br>' + elDef.name + ' element' : '') +
-        '</div></div>';
+        '<div class="tip-compare-name"><b style="color:' + rarity + '">' + it.qualityName + '</b> ' +
+          it.name + '</div>' +
+        '<div class="tip-compare-stats">' + it.desc + elBit + '</div></div>';
     };
 
     const deltas = this.gearCompareDeltas(equipped, item);
@@ -1090,6 +1104,10 @@ class UI {
     return this.el.confirmOverlay && !this.el.confirmOverlay.classList.contains('hidden');
   }
 
+  isUpdateOpen() {
+    return this.el.updateOverlay && !this.el.updateOverlay.classList.contains('hidden');
+  }
+
   askConfirm(opts) {
     if (!this.el.confirmOverlay) {
       if (opts.onConfirm) opts.onConfirm();
@@ -1112,6 +1130,147 @@ class UI {
   cancelConfirm() {
     this.confirmAction = null;
     if (this.el.confirmOverlay) this.el.confirmOverlay.classList.add('hidden');
+  }
+
+  bindUpdater() {
+    const api = typeof window !== 'undefined' ? window.jungleUpdate : null;
+    if (!api || !api.available) return;
+    api.onAvailable((info) => this.showUpdateAvailable(info));
+    api.onProgress((p) => this.showUpdateProgress(p));
+    api.onReady((info) => this.showUpdateReady(info));
+    api.onError((err) => this.showUpdateError(err));
+    api.onStatus((st) => {
+      if (st && st.state === 'openedBrowser') {
+        this.banner('Download started', 'Finish installing from the browser, then relaunch', '#9ef08a');
+        this.dismissUpdate();
+      }
+    });
+  }
+
+  showUpdateAvailable(info) {
+    if (!this.el.updateOverlay || !info) return;
+    this.updateInfo = info;
+    this.updatePhase = 'ask';
+    const cur = info.currentVersion || (typeof BUILD_VERSION === 'string' ? BUILD_VERSION : '?');
+    const next = info.version || '?';
+    if (this.el.updateTitle) this.el.updateTitle.textContent = 'Update available';
+    if (this.el.updateMessage) {
+      this.el.updateMessage.textContent = info.portable
+        ? ('Version ' + next + ' is out (you have ' + cur + '). Open the download page to get the new portable build.')
+        : ('Version ' + next + ' is out (you have ' + cur + '). Update now to install the latest release.');
+    }
+    if (this.el.updateProgressWrap) this.el.updateProgressWrap.classList.add('hidden');
+    const yes = document.getElementById('btnUpdateYes');
+    const no = document.getElementById('btnUpdateNo');
+    if (yes) {
+      yes.disabled = false;
+      yes.textContent = info.portable ? 'Open download' : 'Update now';
+    }
+    if (no) {
+      no.disabled = false;
+      no.classList.remove('hidden');
+      no.textContent = 'Later';
+    }
+    if (this.el.updateHint) {
+      this.el.updateHint.textContent = 'Enter to update · Esc to dismiss';
+    }
+    this.el.updateOverlay.classList.remove('hidden');
+  }
+
+  showUpdateProgress(p) {
+    if (!this.el.updateOverlay) return;
+    this.updatePhase = 'downloading';
+    if (this.el.updateProgressWrap) this.el.updateProgressWrap.classList.remove('hidden');
+    const pct = Math.max(0, Math.min(100, Number(p && p.percent) || 0));
+    if (this.el.updateProgressFill) this.el.updateProgressFill.style.width = pct.toFixed(1) + '%';
+    if (this.el.updateProgressText) {
+      this.el.updateProgressText.textContent = 'Downloading… ' + pct.toFixed(0) + '%';
+    }
+    if (this.el.updateTitle) this.el.updateTitle.textContent = 'Downloading update';
+    if (this.el.updateMessage) this.el.updateMessage.textContent = 'Please wait while the new version downloads.';
+    const yes = document.getElementById('btnUpdateYes');
+    const no = document.getElementById('btnUpdateNo');
+    if (yes) yes.disabled = true;
+    if (no) no.disabled = true;
+    if (this.el.updateHint) this.el.updateHint.textContent = 'Installing will restart the game';
+  }
+
+  showUpdateReady(info) {
+    if (!this.el.updateOverlay) return;
+    this.updatePhase = 'ready';
+    const ver = (info && info.version) || (this.updateInfo && this.updateInfo.version) || '';
+    if (this.el.updateTitle) this.el.updateTitle.textContent = 'Ready to install';
+    if (this.el.updateMessage) {
+      this.el.updateMessage.textContent = 'Version ' + (ver || 'new') +
+        ' downloaded. Restart now to finish updating.';
+    }
+    if (this.el.updateProgressWrap) this.el.updateProgressWrap.classList.add('hidden');
+    const yes = document.getElementById('btnUpdateYes');
+    const no = document.getElementById('btnUpdateNo');
+    if (yes) {
+      yes.disabled = false;
+      yes.textContent = 'Restart & install';
+    }
+    if (no) {
+      no.disabled = false;
+      no.classList.remove('hidden');
+      no.textContent = 'Later';
+    }
+    if (this.el.updateHint) this.el.updateHint.textContent = 'Enter to restart · Esc to dismiss';
+    this.el.updateOverlay.classList.remove('hidden');
+  }
+
+  showUpdateError(err) {
+    const msg = (err && err.message) || 'Update failed';
+    this.banner('Update issue', msg.slice(0, 120), '#ff9a8a');
+    if (this.updatePhase === 'downloading') {
+      this.updatePhase = 'ask';
+      const yes = document.getElementById('btnUpdateYes');
+      const no = document.getElementById('btnUpdateNo');
+      if (yes) yes.disabled = false;
+      if (no) no.disabled = false;
+      if (this.el.updateProgressWrap) this.el.updateProgressWrap.classList.add('hidden');
+      if (this.el.updateTitle) this.el.updateTitle.textContent = 'Update available';
+      if (this.el.updateMessage) {
+        this.el.updateMessage.textContent = 'Automatic download failed. You can open the release page instead.';
+      }
+      if (yes) yes.textContent = 'Open download';
+      if (this.el.updateHint) this.el.updateHint.textContent = 'Enter to open · Esc to dismiss';
+    }
+  }
+
+  acceptUpdate() {
+    const api = window.jungleUpdate;
+    if (!api) {
+      this.dismissUpdate();
+      return;
+    }
+    if (this.updatePhase === 'ready') {
+      api.install().catch(() => {});
+      return;
+    }
+    if (this.updatePhase === 'downloading') return;
+    this.updatePhase = 'downloading';
+    const yes = document.getElementById('btnUpdateYes');
+    if (yes) yes.disabled = true;
+    if (this.el.updateTitle) this.el.updateTitle.textContent = 'Starting update…';
+    api.download().then((res) => {
+      if (res && res.openedBrowser) {
+        this.banner('Download page opened', 'Install the new build, then relaunch', '#9ef08a');
+        this.dismissUpdate();
+      }
+    }).catch((err) => {
+      this.showUpdateError({ message: String(err && err.message || err) });
+    });
+  }
+
+  dismissUpdate() {
+    this.updatePhase = null;
+    if (this.el.updateOverlay) this.el.updateOverlay.classList.add('hidden');
+    const yes = document.getElementById('btnUpdateYes');
+    const no = document.getElementById('btnUpdateNo');
+    if (yes) yes.disabled = false;
+    if (no) no.disabled = false;
   }
 
   disarmRestart() {
@@ -1294,7 +1453,13 @@ class UI {
     if (this.glossaryTab === 'beasts') {
       const ids = Object.keys(SPECIES);
       count = ids.length;
-      html = ids.map((id) => this.glossaryBeastCard(id)).join('');
+      const variantBlurb = (typeof ANIMAL_VARIANTS !== 'undefined')
+        ? '<div class="glossary-section">Variants</div>' +
+          '<p class="glossary-blurb">Any beast can spawn as <b>Basic</b>, <b>Dire</b> (darker, tougher), ' +
+          '<b>Necromantic</b> (undead green-gray), or <b>Demonic</b> (crimson with spikes). ' +
+          'Variants stack with veterancy (bronze → silver → gold stars) and elements.</p>'
+        : '';
+      html = variantBlurb + ids.map((id) => this.glossaryBeastCard(id)).join('');
     } else if (this.glossaryTab === 'cards') {
       const weapons = Object.keys(WEAPON_DEFS);
       const passives = Object.keys(PASSIVE_DEFS);

@@ -204,6 +204,22 @@
     </div>
   </div>
 
+  <div id="updateOverlay" class="overlay hidden">
+    <div class="card confirm-card update-card">
+      <h1 id="updateTitle">Update available</h1>
+      <p id="updateMessage">A newer version is ready to install.</p>
+      <div id="updateProgressWrap" class="update-progress hidden">
+        <div class="update-progress-bar"><div id="updateProgressFill"></div></div>
+        <p id="updateProgressText" class="small">Downloading…</p>
+      </div>
+      <div class="confirm-actions">
+        <button id="btnUpdateYes" class="btn big" type="button">Update now</button>
+        <button id="btnUpdateNo" class="btn big ghost" type="button">Later</button>
+      </div>
+      <p class="small" id="updateHint">Enter to update · Esc to dismiss</p>
+    </div>
+  </div>
+
   <div id="gameOverOverlay" class="overlay hidden">
     <div class="card">
       <h1 id="goTitle">You Fainted!</h1>

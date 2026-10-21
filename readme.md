@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.1.20-alpha-build`
+Version: `0.1.21-alpha-build`
 
 A top-down survival action game: play as a lumberjack in a hostile forest. Chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids, assault waves, minibosses, and true bosses.
 
@@ -12,7 +12,7 @@ A top-down survival action game: play as a lumberjack in a hostile forest. Chop 
 
 You start with a camp and a basic palisade. Explore the forest, gather **wood**, **meat**, and **gold**, then spend them on fortifications and gear. Experience from kills levels you up; each level offers weapon, passive, elemental infusion, or bonus cards.
 
-Threat grows over time. Beasts gain **veterancy stars** (tougher, better loot) and sometimes **elements**. Some animals are melee chargers; sheep and beavers fight at range.
+Threat grows over time. Beasts gain **veterancy stars** — bronze, then silver, then gold (up to 5 each) — and sometimes **elements**. Some animals are melee chargers; sheep and beavers fight at range.
 
 ### Core loop
 
@@ -45,7 +45,7 @@ Runs start with **Palisade level 1**.
 
 - **Auto weapons** — orbiting axes, throwing hatchets, saws, auras, and more; level them via cards.
 - **Elements** — fire, water, nature, earth, light, darkness. Infuse weapons; matchups matter against elemental beasts.
-- **Veterancy** — star ratings on enemies raise HP, damage, XP, and loot.
+- **Veterancy** — bronze → silver → gold stars (5 each) raise HP, damage, XP, and loot.
 - **Power-ups** — magnet, fury, regen, haste, rare nuke orbs on the map.
 - **Gear** — blacksmith stock with quality tiers; hover shop items to compare vs equipped.
 
@@ -116,7 +116,31 @@ Outputs (under `dist/`):
 
 Build scripts back up and restore `save.json` so rebuilds do not wipe progress.
 
-Set `CSC_IDENTITY_AUTO_DISCOVERY=false` is already handled via `signAndEditExecutable: false` (no code signing required for local builds).
+Windows builds embed `build/icon.ico` into the game `.exe` (generated from `icon.png` via `npm run icon`). Code signing is disabled (`win.sign: false`) so local builds do not need a certificate; executable resources (icon + metadata) are still applied.
+
+### Auto-update (GitHub releases)
+
+Packaged builds check the latest [GitHub release](https://github.com/blightyboy/forest-survivor/releases) tag on launch. If the installed `package.json` version is older than that tag, the game prompts to update.
+
+- **Installed (NSIS)** — downloads and installs via `electron-updater` when the release includes builder update metadata (`latest.yml`). Otherwise opens the release download page.
+- **Portable** — opens the release page so you can grab the new portable exe (in-place replace is not supported).
+
+Publish a release with matching version tags (e.g. `v0.1.21-alpha-build`) and upload the built artifacts so update feeds (`latest.yml`) are generated.
+
+**GitHub Actions (recommended):** bump `package.json` version, commit, then either:
+
+```bash
+git tag v0.1.21-alpha-build
+git push origin v0.1.21-alpha-build
+```
+
+or run **Actions → Release → Run workflow** (optional version override). The workflow builds on Windows and publishes the NSIS setup, portable exe, and auto-update metadata.
+
+Local publish (needs `GH_TOKEN`):
+
+```bash
+npm run release
+```
 
 ---
 
@@ -151,7 +175,7 @@ Available from the **main menu** and the **pause** screen:
 
 On a fresh save, popups pause the game to explain:
 
-1. **Beasts** — veterancy stars, elements, melee vs ranged  
+1. **Beasts** — bronze/silver/gold veterancy, elements, melee vs ranged  
 2. **Building** — palisades, towers, and that losing the camp ends the run  
 3. **Blacksmith** — slot-based gear and replacement on buy  
 4. **First night** — minibosses, true bosses every 3 nights, defend the raid  
@@ -169,6 +193,7 @@ Replay them anytime via **Options → Tutorials → On**.
 ├── electron/
 │   ├── main.js         # Electron main process (window, display, save I/O)
 │   ├── preload.js      # Bridge APIs
+│   ├── updater.js      # GitHub release version check + auto-update
 │   └── preserve-save.js
 ├── js/
 │   ├── game.js         # Main loop, raids, waves, progression

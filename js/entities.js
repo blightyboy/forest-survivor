@@ -150,7 +150,6 @@ class Player {
         const dmg = Math.floor(this.poisonAcc);
         this.poisonAcc -= dmg;
         this.hp = Math.max(0, this.hp - dmg);
-        this.flash = 0.1;
         if (Math.random() < 0.4) {
           game.addText(this.x + rand(-8, 8), this.y - 36, String(dmg), '#6dd46a', 12, { life: 0.5, vy: -22 });
         }

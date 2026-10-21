@@ -31,3 +31,38 @@ contextBridge.exposeInMainWorld('jungleDisplay', {
   },
   available: true,
 });
+
+/** GitHub release auto-update (packaged builds). */
+contextBridge.exposeInMainWorld('jungleUpdate', {
+  available: true,
+  check() {
+    return ipcRenderer.invoke('update:check');
+  },
+  download() {
+    return ipcRenderer.invoke('update:download');
+  },
+  install() {
+    return ipcRenderer.invoke('update:install');
+  },
+  openRelease() {
+    return ipcRenderer.invoke('update:openRelease');
+  },
+  pending() {
+    return ipcRenderer.invoke('update:pending');
+  },
+  onAvailable(cb) {
+    ipcRenderer.on('update:available', (_e, info) => cb(info));
+  },
+  onProgress(cb) {
+    ipcRenderer.on('update:progress', (_e, info) => cb(info));
+  },
+  onReady(cb) {
+    ipcRenderer.on('update:ready', (_e, info) => cb(info));
+  },
+  onError(cb) {
+    ipcRenderer.on('update:error', (_e, info) => cb(info));
+  },
+  onStatus(cb) {
+    ipcRenderer.on('update:status', (_e, info) => cb(info));
+  },
+});

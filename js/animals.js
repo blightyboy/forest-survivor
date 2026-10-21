@@ -134,6 +134,80 @@ function isTinyPest(species) { return species === 'squirrel' || species === 'duc
 
 const NO_MULT = { hp: 1, dmg: 1, speed: 1 };
 
+/**
+ * Affliction / elite overlays on any species (orthogonal to dire_* forms,
+ * veterancy stars, and elements).
+ *  - basic: default look & stats
+ *  - dire: darker brute (generic; not the same as dire_boar species)
+ *  - necromantic: undead green-gray
+ *  - demonic: crimson with back spikes
+ */
+const ANIMAL_VARIANTS = {
+  basic: {
+    id: 'basic', name: 'Basic',
+    hp: 1, dmg: 1, speed: 1, xp: 1, loot: 1,
+  },
+  dire: {
+    id: 'dire', name: 'Dire',
+    hp: 1.4, dmg: 1.22, speed: 0.96, xp: 1.35, loot: 1.3,
+    filter: 'brightness(0.66) saturate(0.7) contrast(1.18)',
+    bar: '#8a6040',
+  },
+  necromantic: {
+    id: 'necromantic', name: 'Necromantic',
+    hp: 1.35, dmg: 1.12, speed: 0.92, xp: 1.45, loot: 1.28,
+    filter: 'saturate(0.2) hue-rotate(100deg) brightness(0.92) contrast(1.08)',
+    bar: '#6dd4a0',
+  },
+  demonic: {
+    id: 'demonic', name: 'Demonic',
+    hp: 1.55, dmg: 1.38, speed: 1.04, xp: 1.6, loot: 1.45,
+    filter: 'sepia(0.45) hue-rotate(-18deg) saturate(2.4) brightness(0.72) contrast(1.22)',
+    bar: '#ff4a3a',
+  },
+};
+
+const VARIANT_IDS = ['basic', 'dire', 'necromantic', 'demonic'];
+
+function variantMult(variant) {
+  const v = ANIMAL_VARIANTS[variant] || ANIMAL_VARIANTS.basic;
+  return { hp: v.hp, dmg: v.dmg, speed: v.speed, xp: v.xp, loot: v.loot };
+}
+
+/**
+ * Roll an affliction variant. Higher threat → more dire / necro / demonic.
+ * Swarms stay mostly basic.
+ */
+function rollAnimalVariant(threatM, opts = {}) {
+  if (opts.variant) return opts.variant;
+  if (opts.swarm && Math.random() > 0.2) return 'basic';
+  const m = Math.max(0, threatM || 0);
+  const boss = !!opts.boss;
+  const raider = !!opts.raider;
+  const big = !!opts.big;
+
+  const demonicP = clamp(0.015 + m * 0.014 + (boss ? 0.1 : 0) + (raider ? 0.025 : 0), 0, 0.24);
+  const necroP = clamp(0.03 + m * 0.02 + (boss ? 0.12 : 0) + (raider ? 0.04 : 0), 0, 0.3);
+  const direP = clamp(0.07 + m * 0.028 + (big ? 0.12 : 0) + (boss ? 0.08 : 0) + (raider ? 0.05 : 0), 0, 0.4);
+
+  const r = Math.random();
+  if (r < demonicP) return 'demonic';
+  if (r < demonicP + necroP) return 'necromantic';
+  // Already-dire species skip the generic "Dire" overlay so names don't double up.
+  if (r < demonicP + necroP + direP) {
+    if (opts.species && String(opts.species).startsWith('dire_')) return 'basic';
+    return 'dire';
+  }
+  return 'basic';
+}
+
+function variantDisplayName(baseName, variant) {
+  const v = ANIMAL_VARIANTS[variant];
+  if (!v || variant === 'basic') return baseName;
+  if (variant === 'dire' && /^Dire\b/i.test(baseName)) return baseName;
+  return v.name + ' ' + baseName;
+}
+
 class Animal {
   constructor(species, x, y, opts = {}) {
     const base = SPECIES[species];
@@ -154,24 +228,35 @@ class Animal {
     this.homeX = x; this.homeY = y;
     this.swarm = !!opts.swarm;
     this.big = !!opts.big && isBoarish(species) && !this.boss;
-    this.name = this.boss ? BOSS_NAMES[species] || sp.name : sp.name;
+    this.variant = VARIANT_IDS.includes(opts.variant) ? opts.variant : 'basic';
+    // Generic "Dire" overlay on an already-dire species — promote to necro/demonic instead.
+    if (this.variant === 'dire' && String(species).startsWith('dire_')) {
+      const r = Math.random();
+      this.variant = r < 0.4 ? 'demonic' : r < 0.75 ? 'necromantic' : 'basic';
+    }
+    this.name = this.boss
+      ? (BOSS_NAMES[species] || sp.name)
+      : variantDisplayName(sp.name, this.variant);
     this.scale = this.trueBoss ? (isBearish(species) ? 2.15 : 2.55)
       : this.boss ? (isBearish(species) ? 1.7 : isTinyPest(species) ? 2.6 : 2.1)
       : this.big ? 1.4 : 1;
+    if (this.variant === 'demonic') this.scale *= 1.06;
+    else if (this.variant === 'dire') this.scale *= 1.04;
     this.radius = sp.radius * this.scale;
     this.height = sp.height * this.scale;
     this.bodyOff = sp.bodyOff * this.scale;
-    this.stars = opts.stars != null ? opts.stars : 0;
+    this.stars = clamp(opts.stars != null ? opts.stars : 0, 0, typeof STAR_MAX === 'number' ? STAR_MAX : 15);
     this.element = opts.element || null;
     const sm = starMult(this.stars);
-    this.maxHp = opts.maxHp || Math.round(sp.hp * (this.big ? 3.2 : 1) * mult.hp * sm.hp);
+    const vm = variantMult(this.variant);
+    this.maxHp = opts.maxHp || Math.round(sp.hp * (this.big ? 3.2 : 1) * mult.hp * sm.hp * vm.hp);
     this.hp = this.maxHp;
-    this.attackDamage = Math.round(sp.dmg * (this.big ? 2 : 1) * (this.boss ? 2.5 : 1) * mult.dmg * sm.dmg);
-    this.wanderSpeed = sp.wander * sm.speed;
-    this.chaseSpeed = sp.chase * (this.big ? 0.85 : 1) * (this.boss ? 0.8 : 1) * mult.speed * sm.speed;
+    this.attackDamage = Math.round(sp.dmg * (this.big ? 2 : 1) * (this.boss ? 2.5 : 1) * mult.dmg * sm.dmg * vm.dmg);
+    this.wanderSpeed = sp.wander * sm.speed * vm.speed;
+    this.chaseSpeed = sp.chase * (this.big ? 0.85 : 1) * (this.boss ? 0.8 : 1) * mult.speed * sm.speed * vm.speed;
     this.kbResist = this.boss ? 0.92 : this.big ? 0.4 : 0;
-    this.xpMult = sm.xp;
-    this.lootMult = sm.loot;
+    this.xpMult = sm.xp * vm.xp;
+    this.lootMult = sm.loot * vm.loot;
     this.passive = false;
     this.aggressive = true;
     this.leaving = false;
@@ -250,12 +335,11 @@ class Animal {
     return false;
   }
 
-  /** Fire DoT — no knockback, still counts as a fire killing blow. */
+  /** Fire DoT — no knockback, no hit-flash (embers + float text carry the feedback). */
   applyBurnDamage(amount, game) {
     if (this.dead || amount < 1) return;
     this.lastHit = { dealt: amount, element: 'fire', weaponId: null, source: 'burn' };
     this.hp -= amount;
-    this.flash = 0.08;
     if (!game.nuking && Math.random() < 0.35) {
       game.addText(this.x + rand(-8, 8), this.y - this.height, String(amount), '#ff6a3d', 12, { life: 0.5, vy: -20 });
     }
@@ -719,6 +803,8 @@ class Animal {
     const flash = this.flash > 0;
     const windup = this.state === 'windup' || (this.ability && this.ability.phase === 'tele');
     const angry = !this.dead && this.isHostile(game);
+    const vDef = ANIMAL_VARIANTS[this.variant];
+    if (!flash && vDef && vDef.filter) ctx.filter = vDef.filter;
     switch (animalFamily(this.species)) {
       case 'wolf': drawWolf(ctx, this, flash, windup, angry); break;
       case 'bear': drawBear(ctx, this, flash, windup, angry); break;
@@ -731,6 +817,9 @@ class Animal {
       case 'beaver': drawBeaver(ctx, this, flash, windup); break;
       default: drawBoar(ctx, this, flash, windup, angry);
     }
+    ctx.filter = 'none';
+    if (!flash && this.variant === 'demonic') drawDemonicSpikes(ctx, this);
+    if (!flash && this.variant === 'necromantic') drawNecroEyes(ctx, this);
     if (this.boss) drawCrown(ctx, this.sp.eye[0] - 3, this.sp.eye[1] - 11);
     ctx.restore();
 
@@ -741,13 +830,18 @@ class Animal {
     // True bosses use the screen-space HP bar; skip the tiny world bar.
     if (this.trueBoss) return;
     const barY = this.y - this.height - (this.boss ? 14 : 8);
-    const showBar = this.boss || this.raider || this.hp < this.maxHp || this.stars > 0;
+    const showBar = this.boss || this.raider || this.hp < this.maxHp || this.stars > 0
+      || (this.variant && this.variant !== 'basic');
     if (showBar) {
       const w = this.boss ? 90 : Math.max(this.swarm ? 16 : 26, this.radius * 1.8);
       const col = this.boss ? '#c46bff' : this.raider ? '#ff4d4d' : this.passive ? '#ffd28a'
+        : (vDef && vDef.bar) ? vDef.bar
         : (this.element && ELEMENTS[this.element] ? ELEMENTS[this.element].color : '#ff8a5a');
       drawHpBar(ctx, this.x, barY, w, this.hp / this.maxHp, col);
       if (this.stars > 0) drawStars(ctx, this.x, barY - 7, this.stars);
+      if (this.variant && this.variant !== 'basic') {
+        drawVariantMark(ctx, this.x, barY - (this.stars > 0 ? 14 : 7), this.variant);
+      }
     }
   }
 
@@ -761,9 +855,21 @@ class Animal {
     const e = this.sp.eye;
     const x = this.x + e[0] * this.facing * this.scale, y = this.y + e[1] * this.scale;
     const pulse = 0.75 + Math.sin(game.time * 5 + this.x) * 0.25;
-    ctx.fillStyle = this.raider ? 'rgba(255,70,50,' + (0.35 * pulse) + ')' : 'rgba(255,220,80,' + (0.3 * pulse) + ')';
+    let glow = this.raider ? 'rgba(255,70,50,' + (0.35 * pulse) + ')' : 'rgba(255,220,80,' + (0.3 * pulse) + ')';
+    let core = this.raider ? '#ff6a4d' : '#ffe680';
+    if (this.variant === 'demonic') {
+      glow = 'rgba(255,40,20,' + (0.45 * pulse) + ')';
+      core = '#ff4a2a';
+    } else if (this.variant === 'necromantic') {
+      glow = 'rgba(80,255,140,' + (0.4 * pulse) + ')';
+      core = '#7dffb0';
+    } else if (this.variant === 'dire') {
+      glow = 'rgba(200,120,60,' + (0.35 * pulse) + ')';
+      core = '#ffb060';
+    }
+    ctx.fillStyle = glow;
     ellipse(ctx, x, y, 6, 5); ctx.fill();
-    ctx.fillStyle = this.raider ? '#ff6a4d' : '#ffe680';
+    ctx.fillStyle = core;
     ellipse(ctx, x, y, 1.8, 1.6); ctx.fill();
   }
 }
@@ -777,6 +883,94 @@ function drawCrown(ctx, x, y) {
   ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.1; ctx.stroke();
   ctx.fillStyle = '#e5484d';
   ellipse(ctx, x, y + 0.5, 1.3, 1.3); ctx.fill();
+}
+
+/** Crimson back / shoulder spikes for demonic variants (local animal space). */
+function drawDemonicSpikes(ctx, a) {
+  const baseY = -(a.sp.bodyOff || 10) - 6;
+  const spikes = [
+    [-12, baseY + 2, -14, baseY - 14],
+    [-6, baseY, -7, baseY - 18],
+    [0, baseY - 1, 1, baseY - 20],
+    [6, baseY, 8, baseY - 17],
+    [12, baseY + 2, 15, baseY - 13],
+    [18, baseY + 6, 22, baseY - 6],
+  ];
+  ctx.lineJoin = 'round';
+  for (const [bx, by, tx, ty] of spikes) {
+    ctx.beginPath();
+    ctx.moveTo(bx - 2.2, by);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(bx + 2.2, by);
+    ctx.closePath();
+    ctx.fillStyle = '#5a0a0a';
+    ctx.fill();
+    ctx.strokeStyle = '#1a0000';
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    ctx.fillStyle = '#ff3a2a';
+    ellipse(ctx, tx, ty, 1.2, 1.2);
+    ctx.fill();
+  }
+}
+
+/** Hollow green eyes for necromantic / undead variants. */
+function drawNecroEyes(ctx, a) {
+  const e = a.sp.eye || [16, -16];
+  ctx.fillStyle = 'rgba(40, 80, 50, 0.55)';
+  ellipse(ctx, e[0], e[1], 3.2, 2.8);
+  ctx.fill();
+  ctx.fillStyle = '#7dffb0';
+  ellipse(ctx, e[0], e[1], 1.6, 1.4);
+  ctx.fill();
+  ctx.fillStyle = '#0a1a10';
+  ellipse(ctx, e[0] + 0.3, e[1], 0.7, 0.9);
+  ctx.fill();
+}
+
+/** Tiny glyph above the HP bar for non-basic variants. */
+function drawVariantMark(ctx, x, y, variant) {
+  const v = ANIMAL_VARIANTS[variant];
+  if (!v || !v.bar) return;
+  ctx.save();
+  ctx.translate(x, y);
+  if (variant === 'demonic') {
+    ctx.beginPath();
+    ctx.moveTo(0, -4);
+    ctx.lineTo(3.5, 3);
+    ctx.lineTo(-3.5, 3);
+    ctx.closePath();
+    ctx.fillStyle = v.bar;
+    ctx.fill();
+    ctx.strokeStyle = '#4a0808';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  } else if (variant === 'necromantic') {
+    ctx.strokeStyle = v.bar;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(-3, -3);
+    ctx.lineTo(3, 3);
+    ctx.moveTo(3, -3);
+    ctx.lineTo(-3, 3);
+    ctx.stroke();
+    ctx.fillStyle = v.bar;
+    ellipse(ctx, 0, 0, 1.4, 1.4);
+    ctx.fill();
+  } else if (variant === 'dire') {
+    ctx.fillStyle = v.bar;
+    ctx.beginPath();
+    ctx.moveTo(0, -3.5);
+    ctx.lineTo(3, 0);
+    ctx.lineTo(0, 3.5);
+    ctx.lineTo(-3, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#3a2410';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawSquirrel(ctx, a, flash, windup) {

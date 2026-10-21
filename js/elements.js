@@ -93,44 +93,94 @@ function applyElementOnKill(a, element, dealt, game, weaponId) {
   }
 }
 
-/** Per-star bonuses stacked on enemy base stats. */
-const STAR_HP = 0.22;
-const STAR_DMG = 0.14;
-const STAR_SPEED = 0.035;
-const STAR_XP = 0.7;
-const STAR_LOOT = 0.4;   // +40% resource drops per veterancy star
+/**
+ * Veterancy ranks 0–15:
+ *   1–5   bronze ★
+ *   6–10  silver ★
+ *   11–15 gold ★
+ * Display shows only the current tier's 1–5 stars (color = tier).
+ */
+const STAR_MAX = 15;
+const STAR_TIER_SIZE = 5;
+
+/** Per-rank bonuses stacked on enemy base stats (tuned for 15 ranks). */
+const STAR_HP = 0.17;
+const STAR_DMG = 0.11;
+const STAR_SPEED = 0.028;
+const STAR_XP = 0.55;
+const STAR_LOOT = 0.32;
+
+const STAR_TIER_STYLE = {
+  bronze: { fill: '#c47a3a', stroke: '#5a3010' },
+  silver: { fill: '#d8dee8', stroke: '#4a5568' },
+  gold: { fill: '#ffe066', stroke: '#8a5d00' },
+};
+
+/** @returns {{ tier: 'bronze'|'silver'|'gold'|null, count: number, fill: string|null, stroke: string|null }} */
+function starTierInfo(stars) {
+  const n = clamp(stars | 0, 0, STAR_MAX);
+  if (n <= 0) return { tier: null, count: 0, fill: null, stroke: null };
+  if (n <= STAR_TIER_SIZE) {
+    const s = STAR_TIER_STYLE.bronze;
+    return { tier: 'bronze', count: n, fill: s.fill, stroke: s.stroke };
+  }
+  if (n <= STAR_TIER_SIZE * 2) {
+    const s = STAR_TIER_STYLE.silver;
+    return { tier: 'silver', count: n - STAR_TIER_SIZE, fill: s.fill, stroke: s.stroke };
+  }
+  const s = STAR_TIER_STYLE.gold;
+  return { tier: 'gold', count: n - STAR_TIER_SIZE * 2, fill: s.fill, stroke: s.stroke };
+}
 
 /**
- * Roll 0–5 difficulty stars (veterancy). As threat rises, veterans become both
- * more common and more heavily starred. Deer stay at 0; swarms cap lower.
- *
- * Rough ambient odds by minutes played:
- *   ~0–2m  mostly 0★, rare 1★
- *   ~5m    many 1–2★
- *   ~10m+  2–4★ common, 5★ possible
+ * Roll 0–15 veterancy ranks. Threat unlocks higher caps:
+ *   early     bronze (1–5)
+ *   mid       silver (6–10)
+ *   late      gold (11–15)
+ * Swarms stay in bronze.
  */
 function rollStars(threatM, opts = {}) {
   if (opts.passive) return 0;
   const m = Math.max(0, threatM || 0);
-  let bias = m * 0.95 + (opts.boss ? 2.4 : 0) + (opts.big ? 0.7 : 0) + (opts.raider ? 0.55 : 0);
+  let bias = m * 0.85 + (opts.boss ? 2.8 : 0) + (opts.big ? 0.7 : 0) + (opts.raider ? 0.55 : 0);
   if (opts.swarm) bias *= 0.4;
-  // Unlock higher star caps sooner as the run progresses.
-  const max = opts.boss ? 5
-    : opts.swarm ? Math.min(2, 1 + Math.floor(m / 4))
-    : Math.min(5, 1 + Math.floor(m / 1.15));
+
+  let max;
+  if (opts.swarm) {
+    max = Math.min(STAR_TIER_SIZE, 1 + Math.floor(m / 3.5));
+  } else if (opts.boss) {
+    // Bosses reach silver earlier and can hit gold late.
+    max = Math.min(STAR_MAX, 3 + Math.floor(m / 1.15));
+  } else {
+    // Ambient: bronze early, silver ~6–8m, gold ~12m+.
+    max = Math.min(STAR_MAX, 1 + Math.floor(m / 0.95));
+  }
+
   let stars = 0;
   for (let s = 1; s <= max; s++) {
-    // Base chance climbs with threat; higher stars stay rarer but open up later.
-    const chance = clamp(0.16 + bias * 0.11 - s * (0.09 - Math.min(0.04, m * 0.003)), 0.04, 0.82);
+    // Higher ranks (esp. silver/gold) stay rarer; threat softens the cliff.
+    const tierPenalty = s <= 5 ? 0 : s <= 10 ? 0.04 : 0.07;
+    const chance = clamp(
+      0.15 + bias * 0.095 - s * (0.055 - Math.min(0.03, m * 0.002)) - tierPenalty,
+      0.03,
+      0.8
+    );
     if (Math.random() < chance) stars = s;
     else break;
   }
-  if (opts.boss) stars = Math.max(stars, Math.min(5, 2 + Math.floor(m / 2.5)));
-  // Late-game floor: after ~8 minutes, ambient packs often carry at least 1★.
+
+  if (opts.boss) {
+    stars = Math.max(stars, Math.min(STAR_MAX, 2 + Math.floor(m / 1.9)));
+  }
+  // Late-game floor: after ~8 minutes, ambient packs often carry at least 1★ bronze.
   if (!opts.boss && !opts.swarm && m >= 8 && stars === 0 && Math.random() < clamp((m - 8) * 0.08, 0, 0.55)) {
     stars = 1;
   }
-  return stars;
+  // Mid-late floor: after ~14 minutes, often at least mid-bronze / start of silver.
+  if (!opts.boss && !opts.swarm && m >= 14 && stars < 4 && Math.random() < clamp((m - 14) * 0.06, 0, 0.45)) {
+    stars = Math.max(stars, 4);
+  }
+  return clamp(stars, 0, STAR_MAX);
 }
 
 function rollEnemyElement(opts = {}) {
@@ -141,12 +191,13 @@ function rollEnemyElement(opts = {}) {
 }
 
 function starMult(stars) {
+  const n = clamp(stars | 0, 0, STAR_MAX);
   return {
-    hp: 1 + stars * STAR_HP,
-    dmg: 1 + stars * STAR_DMG,
-    speed: 1 + stars * STAR_SPEED,
-    xp: 1 + stars * STAR_XP,
-    loot: 1 + stars * STAR_LOOT,
+    hp: 1 + n * STAR_HP,
+    dmg: 1 + n * STAR_DMG,
+    speed: 1 + n * STAR_SPEED,
+    xp: 1 + n * STAR_XP,
+    loot: 1 + n * STAR_LOOT,
   };
 }
 
@@ -406,11 +457,12 @@ function gearBonuses(gear) {
   return out;
 }
 
-function drawStars(ctx, x, y, n) {
-  if (n <= 0) return;
+function drawStars(ctx, x, y, stars) {
+  const info = starTierInfo(stars);
+  if (!info.count) return;
   const gap = 7;
-  const start = x - ((n - 1) * gap) / 2;
-  for (let i = 0; i < n; i++) {
+  const start = x - ((info.count - 1) * gap) / 2;
+  for (let i = 0; i < info.count; i++) {
     const sx = start + i * gap;
     ctx.beginPath();
     for (let p = 0; p < 10; p++) {
@@ -420,11 +472,17 @@ function drawStars(ctx, x, y, n) {
       if (p === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.closePath();
-    ctx.fillStyle = '#ffe066';
+    ctx.fillStyle = info.fill;
     ctx.fill();
-    ctx.strokeStyle = '#8a5d00';
+    ctx.strokeStyle = info.stroke;
     ctx.lineWidth = 0.7;
     ctx.stroke();
+    // Silver / gold get a small highlight so tiers read clearly at a glance.
+    if (info.tier !== 'bronze') {
+      ctx.fillStyle = info.tier === 'gold' ? 'rgba(255,255,220,0.55)' : 'rgba(255,255,255,0.45)';
+      ellipse(ctx, sx - 0.6, y - 0.8, 1.1, 0.9);
+      ctx.fill();
+    }
   }
 }
 

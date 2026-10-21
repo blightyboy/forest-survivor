@@ -533,6 +533,12 @@ class Game {
   }
 
   handleAction(code) {
+    if (this.ui.isUpdateOpen()) {
+      if (this.ui.updatePhase === 'downloading') return;
+      if (code === 'Enter' || code === 'Space') this.ui.acceptUpdate();
+      else if (code === 'Escape' || code === 'KeyP') this.ui.dismissUpdate();
+      return;
+    }
     if (this.ui.isConfirmOpen()) {
       if (code === 'Enter' || code === 'Space') this.ui.acceptConfirm();
       else if (code === 'Escape' || code === 'KeyP') this.ui.cancelConfirm();
@@ -1085,6 +1091,12 @@ class Game {
         passive: false, threatM,
       });
     }
+    if (opts.variant == null) {
+      opts.variant = rollAnimalVariant(threatM, {
+        boss: opts.boss, big: opts.big, raider: opts.raider, swarm: opts.swarm,
+        species: opts.species,
+      });
+    }
     return opts;
   }
 
@@ -1305,7 +1317,8 @@ class Game {
       if (!far) return;
       x = far.x; y = far.y;
     }
-    const stars = Math.max(3, rollStars(t.m, { boss: true, raider: true }));
+    // True bosses start at least mid-silver; late waves push toward gold.
+    const stars = Math.max(8, rollStars(t.m, { boss: true, raider: true }));
     const sm = starMult(stars);
     const dire = species.startsWith('dire_');
     const hp = Math.round(SPECIES[species].hp * (42 + wave * 10) * t.hp * sm.hp * (dire ? 0.9 : 1));
@@ -1355,7 +1368,7 @@ class Game {
     else if (isTinyPest(kind)) chance = 0.028;
     if (a.big) chance += 0.025;
     chance += Math.min(0.06, day * 0.006);
-    chance *= 1 + Math.min(0.5, (a.stars || 0) * 0.08);
+    chance *= 1 + Math.min(0.55, (a.stars || 0) * 0.045);
     if (Math.random() > chance) return;
 
     this.spawnDayBoss(kind, a.x, a.y);
@@ -1369,7 +1382,8 @@ class Game {
       || this.findEnemySpawn(this.player.x, this.player.y, 420, 780, 36)
       || this.findEnemySpawn(this.base.x, this.base.y, 520, 900, 36);
     if (!spot || this.spawnInBase(spot.x, spot.y)) return;
-    const stars = Math.max(1, rollStars(t.m, { boss: true }));
+    // Day champions: at least mid-bronze; later days push into silver.
+    const stars = Math.max(3, rollStars(t.m, { boss: true }));
     const sm = starMult(stars);
     const tiny = isTinyPest(species);
     const dire = species.startsWith('dire_');
@@ -1572,7 +1586,7 @@ class Game {
     if (a.boss) chance = 0.55;
     else if (a.swarm) chance = 0.018;
     else if (a.big || a.raider) chance = 0.14;
-    chance += (a.stars || 0) * 0.025;
+    chance += Math.min(0.35, (a.stars || 0) * 0.018);
     if (Math.random() > chance) return;
     let total = 0;
     for (const id of POWERUP_IDS) total += POWERUPS[id].weight;
@@ -1826,7 +1840,7 @@ class Game {
     if (a.boss) this.counters.bosses++;
     const tm = this.threat().m;
     const stars = a.stars || 0;
-    const lootM = (a.lootMult || (1 + stars * 0.4)) * (this.ps.lootMult || 1);
+    const lootM = (a.lootMult || (1 + stars * STAR_LOOT)) * (this.ps.lootMult || 1);
     // Threat scales loot & XP; veterancy multiplies further via lootM / xpMult.
     const threatLoot = 1 + tm * 0.14;
     const threatXp = 1 + tm * 0.12;
@@ -1834,18 +1848,18 @@ class Game {
     let meat = (a.boss ? 4 : 0) + (a.big ? 2 : 0)
       + sp.meat[0] + Math.floor(Math.random() * (sp.meat[1] - sp.meat[0] + 1));
     meat = Math.round(meat * lootM * threatLoot);
-    if (stars >= 3) meat += stars - 2;
+    if (stars >= 3) meat += Math.min(10, stars - 2);
     if (meat > 0) this.spawnDrops('meat', meat, a.x, a.y);
 
     const goldChance = Math.min(1, (a.boss ? 1 : sp.goldChance)
-      * (1 + stars * 0.15) * (1 + tm * 0.05));
+      * (1 + stars * 0.1) * (1 + tm * 0.05));
     let gold = Math.random() < goldChance ? sp.gold : 0;
     if (a.big) gold += 2;
     if (a.boss) gold += 6 + this.dayNumber();
     if (a.raider) gold += 1;
     if (gold > 0) {
       gold = Math.round(gold * lootM * threatLoot);
-      gold += Math.floor(stars * 0.75) + Math.floor(tm * 0.35);
+      gold += Math.floor(stars * 0.55) + Math.floor(tm * 0.35);
       this.spawnDrops('gold', Math.max(1, gold), a.x, a.y);
     }
 

@@ -1,16 +1,18 @@
 {
   "name": "forest-survivor",
   "productName": "Forest Survivor",
-  "version": "0.1.20-alpha-build",
+  "version": "0.1.21-alpha-build",
   "description": "Chop, hunt, and fortify your forest camp.",
   "main": "electron/main.js",
   "author": "Forest Survivor",
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
-    "build": "node electron/preserve-save.js backup && electron-builder --win && node electron/preserve-save.js restore",
-    "build:dir": "node electron/preserve-save.js backup && electron-builder --win --dir && node electron/preserve-save.js restore",
-    "build:portable": "node electron/preserve-save.js backup && electron-builder --win portable && node electron/preserve-save.js restore"
+    "icon": "node electron/make-icon.js",
+    "build": "node electron/make-icon.js && node electron/preserve-save.js backup && electron-builder --win && node electron/preserve-save.js restore",
+    "build:dir": "node electron/make-icon.js && node electron/preserve-save.js backup && electron-builder --win --dir && node electron/preserve-save.js restore",
+    "build:portable": "node electron/make-icon.js && node electron/preserve-save.js backup && electron-builder --win portable && node electron/preserve-save.js restore",
+    "release": "node electron/make-icon.js && electron-builder --win --publish always"
   },
   "build": {
     "appId": "com.forestsurvivor.game",
@@ -20,7 +22,7 @@
       "output": "dist",
       "buildResources": "build"
     },
-    "icon": "icon.png",
+    "icon": "build/icon.ico",
     "files": [
       "index.html",
       "style.css",
@@ -31,16 +33,20 @@
     ],
     "extraFiles": [],
     "win": {
-      "icon": "icon.png",
-      "signAndEditExecutable": false,
+      "icon": "build/icon.ico",
+      "sign": false,
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
@@ -55,10 +61,20 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Forest Survivor",
       "artifactName": "ForestSurvivor-Setup-${version}.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "blightyboy",
+        "repo": "forest-survivor"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

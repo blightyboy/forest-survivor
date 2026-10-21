@@ -768,9 +768,30 @@ html, body {
 
 #tutorialOverlay { z-index: 75; }
 #confirmOverlay { z-index: 80; }
+#updateOverlay { z-index: 85; }
 .confirm-card {
   width: min(400px, 92vw);
   text-align: center;
+}
+.update-card { width: min(420px, 92vw); }
+.update-progress {
+  margin: 0 0 14px;
+}
+.update-progress-bar {
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 224, 138, 0.25);
+  overflow: hidden;
+}
+#updateProgressFill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6a9a3a, #c8e06a);
+  transition: width 0.2s ease;
+}
+#updateProgressText {
+  margin: 8px 0 0;
 }
 .confirm-card h1 {
   margin: 0 0 8px;
@@ -1173,6 +1194,13 @@ body.in-menu #bossHud { visibility: hidden; pointer-events: none; }
   color: #ffe08a;
   opacity: 0.85;
   margin: 6px 2px 2px;
+}
+.glossary-blurb {
+  margin: 0 2px 8px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  opacity: 0.88;
+  font-weight: 600;
 }
 .glossary-card {
   display: grid;
