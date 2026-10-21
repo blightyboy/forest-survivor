@@ -190,7 +190,18 @@ function createWindow() {
 
   mainWindow = win;
   Menu.setApplicationMenu(null);
-  win.loadFile(path.join(__dirname, '..', 'index.html'));
+
+  // Phaser 3 + Vite: dev server in development, dist-web in production.
+  const isDev = !app.isPackaged && process.env.JUNGLE_VITE !== '0';
+  if (isDev) {
+    const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/';
+    win.loadURL(viteUrl).catch((err) => {
+      console.warn('[electron] Vite load failed, falling back to dist-web:', err && err.message);
+      win.loadFile(path.join(__dirname, '..', 'dist-web', 'index.html'));
+    });
+  } else {
+    win.loadFile(path.join(__dirname, '..', 'dist-web', 'index.html'));
+  }
 
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => {

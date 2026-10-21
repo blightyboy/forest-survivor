@@ -1,0 +1,240 @@
+:root {
+  --fs-bg: rgba(12, 22, 10, 0.82);
+  --fs-border: rgba(109, 212, 106, 0.35);
+  --fs-text: #e8f0e4;
+  --fs-muted: #9ab39a;
+  --fs-accent: #6dd46a;
+  --fs-danger: #ff6a5c;
+  --fs-gold: #ffe066;
+  --fs-font: 'Segoe UI', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: #0a1208;
+  font-family: var(--fs-font);
+  color: var(--fs-text);
+}
+
+#game-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+#dom-ui {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  font-size: 14px;
+}
+
+#dom-ui .interactive {
+  pointer-events: auto;
+}
+
+.fs-hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.fs-panel {
+  background: var(--fs-bg);
+  border: 1px solid var(--fs-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.fs-bar {
+  width: 180px;
+  height: 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.fs-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #4a9e3a, var(--fs-accent));
+  border-radius: 4px;
+  transition: width 0.15s ease;
+}
+
+.fs-bar.hp-low > span {
+  background: linear-gradient(90deg, #a83228, var(--fs-danger));
+}
+
+.fs-resources {
+  display: flex;
+  gap: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-resources span {
+  color: var(--fs-muted);
+}
+
+.fs-resources strong {
+  color: var(--fs-text);
+  margin-left: 4px;
+}
+
+.fs-time {
+  text-align: right;
+  font-size: 13px;
+  color: var(--fs-muted);
+}
+
+.fs-fps {
+  font-size: 11px;
+  color: var(--fs-muted);
+  opacity: 0.8;
+}
+
+.fs-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 8, 4, 0.72);
+  pointer-events: auto;
+}
+
+.fs-modal {
+  min-width: 320px;
+  max-width: 520px;
+  max-height: 85vh;
+  overflow: auto;
+  padding: 20px 24px;
+}
+
+.fs-modal h1,
+.fs-modal h2 {
+  margin: 0 0 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.fs-modal p {
+  margin: 0 0 16px;
+  color: var(--fs-muted);
+  line-height: 1.45;
+}
+
+.fs-btn {
+  display: inline-block;
+  margin: 4px 6px 4px 0;
+  padding: 10px 18px;
+  border: 1px solid var(--fs-border);
+  border-radius: 6px;
+  background: rgba(40, 60, 32, 0.9);
+  color: var(--fs-text);
+  cursor: pointer;
+  font: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.fs-btn:hover {
+  background: rgba(60, 90, 48, 0.95);
+  border-color: var(--fs-accent);
+}
+
+.fs-btn.primary {
+  background: rgba(50, 100, 42, 0.95);
+  border-color: var(--fs-accent);
+}
+
+.fs-btn.danger {
+  border-color: rgba(255, 106, 92, 0.5);
+}
+
+.fs-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.fs-card {
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(20, 32, 18, 0.95);
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.fs-card:hover {
+  border-color: var(--fs-accent);
+}
+
+.fs-card .title {
+  font-weight: 600;
+  color: var(--fs-accent);
+}
+
+.fs-card .desc {
+  font-size: 12px;
+  color: var(--fs-muted);
+  margin-top: 4px;
+}
+
+.fs-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 12px;
+}
+
+.fs-meta-row button {
+  flex-shrink: 0;
+}
+
+.fs-tip {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--fs-muted);
+  background: var(--fs-bg);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fs-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 10px;
+  background: var(--fs-gold);
+  color: #2a2010;
+  margin-left: 8px;
+}
+
+.hidden {
+  display: none !important;
+}

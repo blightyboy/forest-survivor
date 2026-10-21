@@ -83,9 +83,9 @@ jobs:
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
             pkg.version = ver;
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-            let utils = fs.readFileSync('js/utils.js', 'utf8');
-            utils = utils.replace(/const BUILD_VERSION = '[^']*';/, \"const BUILD_VERSION = '\" + ver + \"';\");
-            fs.writeFileSync('js/utils.js', utils);
+            let math = fs.readFileSync('src/core/math.ts', 'utf8');
+            math = math.replace(/export const BUILD_VERSION = '[^']*';/, \"export const BUILD_VERSION = '\" + ver + \"';\");
+            fs.writeFileSync('src/core/math.ts', math);
             console.log('Synced version to', ver);
           " "$VER"
 
@@ -138,8 +138,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if ! git diff --quiet -- package.json js/utils.js; then
-            git add package.json js/utils.js
+          if ! git diff --quiet -- package.json src/core/math.ts; then
+            git add package.json src/core/math.ts
             git commit -m "chore: bump version to ${{ steps.ver.outputs.version }}"
             git push origin HEAD
             echo "Committed version bump"

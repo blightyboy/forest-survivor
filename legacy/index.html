@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Forest Survivor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game" aria-label="Game view"></canvas>
+
+  <div id="hud">
+    <div class="hud-left">
+      <div class="panel status">
+        <div class="level-badge" title="Player level"><span id="lvlNum">1</span></div>
+        <div class="status-bars">
+          <div class="bar hp" id="hpBar" title="Health">
+            <i class="icon" data-icon="heart"></i>
+            <div class="track"><div class="fill" id="hpFill"></div><span id="hpText">100/100</span></div>
+          </div>
+          <div class="bar camp" id="campBar" title="Camp health: if it falls, the run ends">
+            <i class="icon" data-icon="house"></i>
+            <div class="track"><div class="fill" id="campFill"></div><span id="campText">300/300</span></div>
+          </div>
+          <div class="xp" title="Experience"><div class="fill" id="xpFill"></div></div>
+        </div>
+      </div>
+      <div id="buffHud" class="buff-hud"></div>
+    </div>
+
+    <div class="panel resources">
+      <div class="res" id="resWood" title="Wood"><i class="icon" data-icon="wood"></i><span id="woodCount">0</span></div>
+      <div class="res" id="resMeat" title="Meat"><i class="icon" data-icon="meat"></i><span id="meatCount">0</span></div>
+      <div class="res" id="resGold" title="Gold"><i class="icon" data-icon="gold"></i><span id="goldCount">0</span></div>
+    </div>
+
+    <div class="panel clock" id="clock" title="Day / night cycle. Raids attack the camp every night">
+      <i class="icon" id="clockIcon"></i>
+      <div class="clock-body">
+        <div class="clock-top"><b id="dayText">Day 1</b><span id="threatText">Threat x1.0</span></div>
+        <div class="daybar"><div class="fill" id="dayFill"></div></div>
+        <div class="clock-sub" id="phaseText"></div>
+      </div>
+    </div>
+
+    <div class="panel fps" id="fpsCounter" title="Run time and frames per second">
+      <span id="runTimer" title="Run time">0:00</span>
+      <span class="fps-sep">·</span>
+      <span id="fpsText" title="Frames per second">--</span> FPS
+    </div>
+
+    <div class="panel buttons">
+      <button id="btnUpgrades" class="btn" type="button" title="Toggle camp upgrades (U)"><i class="icon" data-icon="up"></i></button>
+      <button id="btnPause" class="btn" type="button" title="Pause (P / Esc)"></button>
+      <button id="btnRestart" class="btn" type="button" title="Restart"><i class="icon" data-icon="restart"></i></button>
+      <button id="btnSound" class="btn" type="button" title="Sound (M)"></button>
+    </div>
+  </div>
+
+  <div id="bossHud" class="boss-hud hidden">
+    <div class="boss-name" id="bossName">Boss</div>
+    <div class="boss-track"><div class="boss-fill" id="bossFill"></div></div>
+    <div class="boss-sub" id="bossSub"></div>
+  </div>
+
+  <div id="loadout" class="loadout"></div>
+  <div id="tipPop" class="tip-pop hidden" role="tooltip"></div>
+
+  <aside id="upgradePanel" class="panel tab-base">
+    <header>
+      <h2>Camp</h2>
+      <button id="btnPanelClose" class="btn small" type="button" title="Hide upgrades (U)">&#10005;</button>
+    </header>
+    <div id="campNote" class="camp-note"></div>
+    <div class="camp-tabs">
+      <button id="tabBuild" class="camp-tab active" type="button">Build</button>
+      <button id="tabSmith" class="camp-tab" type="button">Smith</button>
+    </div>
+    <div id="upgradeList"></div>
+    <div id="smithPanel" class="smith-panel hidden">
+      <div id="gearRow" class="gear-row"></div>
+      <div class="smith-refresh">
+        <span>Stock refreshes in <b id="smithTimer">5:00</b></span>
+        <button id="btnSmithReroll" class="btn smith-reroll" type="button" title="Reroll shop stock for gold">
+          Reroll <span id="smithRerollCost">8</span>g
+        </button>
+      </div>
+      <div id="shopList" class="shop-list"></div>
+    </div>
+  </aside>
+
+  <div id="gearHud" class="gear-hud"></div>
+
+  <div id="banner" class="hidden">
+    <div id="bannerTitle"></div>
+    <div id="bannerSub"></div>
+  </div>
+
+  <div id="hint">
+    <b>WASD / Arrows</b> move &middot; <b>Space</b> dash &middot; <b>F</b> aim lock &middot; <b>1-9</b> build &middot; <b>B</b> smith &middot; <b>1-5</b> cards &middot; <b>R</b> reroll &middot; <b>U</b> camp &middot; <b>P</b> pause &middot; <b>M</b> sound
+    <span class="touch-only">&middot; drag to move</span>
+  </div>
+
+  <div id="buildWatermark" aria-hidden="true">0.1.20-alpha-build</div>
+
+  <div id="cardOverlay" class="overlay hidden">
+    <div class="card-wrap">
+      <h1 id="cardTitle">Level up</h1>
+      <p>Choose a weapon, infusion, or power. Infuse a weapon with one element.</p>
+      <div id="cardRow"></div>
+      <div class="card-actions">
+        <button id="cardReroll" class="btn card-act" type="button" title="Reroll choices (R)">Reroll (<span id="cardRerollLeft">5</span>)</button>
+        <span class="card-banish-meta">Banishes left: <b id="cardBanishLeft">5</b></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="pauseOverlay" class="overlay hidden">
+    <div class="card pause-sheet">
+      <header class="pause-head">
+        <div>
+          <h1>Paused</h1>
+          <p class="pause-sub">Character sheet · the forest waits</p>
+        </div>
+        <p class="small pause-hint">P / Esc to resume</p>
+      </header>
+      <div id="pauseSheet" class="pause-sheet-body"></div>
+      <div class="pause-actions">
+        <button id="btnResume" class="btn big" type="button">Resume</button>
+        <button id="btnPauseOptions" class="btn big ghost" type="button">Options</button>
+        <button id="btnPauseMenu" class="btn big ghost" type="button">Main Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="optionsOverlay" class="overlay hidden">
+    <div class="card options-card">
+      <header class="options-head">
+        <button id="btnOptionsBack" class="btn small" type="button" title="Back">&#8592;</button>
+        <h1>Options</h1>
+        <span class="options-head-spacer"></span>
+      </header>
+
+      <div class="options-section">
+        <div class="options-label">Display mode</div>
+        <div class="options-modes" role="group" aria-label="Display mode">
+          <button type="button" class="options-mode" data-mode="windowed">Windowed</button>
+          <button type="button" class="options-mode" data-mode="borderless">Borderless</button>
+          <button type="button" class="options-mode" data-mode="fullscreen">Fullscreen</button>
+        </div>
+      </div>
+
+      <div class="options-section">
+        <label class="options-label" for="optResolution">Resolution</label>
+        <select id="optResolution" class="options-select"></select>
+        <p class="options-hint">Applies in windowed mode. Borderless &amp; fullscreen use the monitor size.</p>
+      </div>
+
+      <div class="options-section">
+        <label class="options-label" for="optMusicVolume">Music volume <span id="optMusicPct">55%</span></label>
+        <input id="optMusicVolume" class="options-slider" type="range" min="0" max="100" step="1" value="55" />
+      </div>
+
+      <div class="options-divider">Accessibility</div>
+
+      <div class="options-section">
+        <label class="options-label" for="optUiScale">UI scale <span id="optUiScalePct">100%</span></label>
+        <input id="optUiScale" class="options-slider" type="range" min="80" max="150" step="5" value="100" />
+        <p class="options-hint">Enlarges HUD, panels, and menus (game world stays the same).</p>
+      </div>
+
+      <div class="options-section">
+        <label class="options-label" for="optFontScale">Font size <span id="optFontScalePct">100%</span></label>
+        <input id="optFontScale" class="options-slider" type="range" min="85" max="160" step="5" value="100" />
+        <p class="options-hint">Increases text size across menus and the HUD.</p>
+      </div>
+
+      <div class="options-section">
+        <label class="options-label" for="optShakeScale">Screen shake <span id="optShakePct">100%</span></label>
+        <input id="optShakeScale" class="options-slider" type="range" min="0" max="100" step="5" value="100" />
+        <p class="options-hint">Camera shake from hits and explosions. Set to 0% to disable.</p>
+      </div>
+
+      <div class="options-section options-toggle-row">
+        <label class="options-label" for="optTutorials">Tutorials</label>
+        <button id="optTutorials" class="options-toggle" type="button" aria-pressed="true">On</button>
+        <p class="options-hint">First-run tips. Turn on again to replay every tutorial popup.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="tutorialOverlay" class="overlay hidden">
+    <div class="card tutorial-card">
+      <div class="tutorial-badge">Tutorial</div>
+      <h1 id="tutorialTitle">Tip</h1>
+      <div id="tutorialBody" class="tutorial-body"></div>
+      <button id="btnTutorialOk" class="btn big" type="button">Got it</button>
+      <p class="small">Enter / Esc to continue</p>
+    </div>
+  </div>
+
+  <div id="confirmOverlay" class="overlay hidden">
+    <div class="card confirm-card">
+      <h1 id="confirmTitle">Are you sure?</h1>
+      <p id="confirmMessage">This cannot be undone.</p>
+      <div class="confirm-actions">
+        <button id="btnConfirmYes" class="btn big" type="button">Yes</button>
+        <button id="btnConfirmNo" class="btn big ghost" type="button">Cancel</button>
+      </div>
+      <p class="small">Enter to confirm · Esc to cancel</p>
+    </div>
+  </div>
+
+  <div id="updateOverlay" class="overlay hidden">
+    <div class="card confirm-card update-card">
+      <h1 id="updateTitle">Update available</h1>
+      <p id="updateMessage">A newer version is ready to install.</p>
+      <div id="updateProgressWrap" class="update-progress hidden">
+        <div class="update-progress-bar"><div id="updateProgressFill"></div></div>
+        <p id="updateProgressText" class="small">Downloading…</p>
+      </div>
+      <div class="confirm-actions">
+        <button id="btnUpdateYes" class="btn big" type="button">Update now</button>
+        <button id="btnUpdateNo" class="btn big ghost" type="button">Later</button>
+      </div>
+      <p class="small" id="updateHint">Enter to update · Esc to dismiss</p>
+    </div>
+  </div>
+
+  <div id="gameOverOverlay" class="overlay hidden">
+    <div class="card">
+      <h1 id="goTitle">You Fainted!</h1>
+      <div id="goStats" class="stats"></div>
+      <div id="goCredits" class="go-credits"></div>
+      <button id="btnPlayAgain" class="btn big" type="button">Play Again</button>
+      <button id="btnGoMenu" class="btn big ghost" type="button">Main Menu</button>
+      <p class="small">Press Enter to restart</p>
+    </div>
+  </div>
+
+  <div id="mainMenu" class="overlay menu-overlay">
+    <div class="menu-shell">
+      <div id="menuHome" class="menu-view">
+        <div class="menu-brand">Forest Survivor</div>
+        <p class="menu-tagline">Chop, hunt, fortify — survive the forest nights.</p>
+        <div class="menu-credits" id="menuCreditsHome">0 Credits</div>
+        <div class="menu-meta-row" id="menuMetaStats"></div>
+        <button id="btnNewRun" class="btn big menu-cta" type="button">New Run</button>
+        <button id="btnOpenMeta" class="btn big ghost menu-cta" type="button">Upgrade Character</button>
+        <button id="btnOpenGlossary" class="btn big ghost menu-cta" type="button">Glossary</button>
+        <button id="btnOpenOptions" class="btn big ghost menu-cta" type="button">Options</button>
+        <button id="btnExitGame" class="btn big ghost menu-cta" type="button">Exit Game</button>
+      </div>
+      <div id="menuMeta" class="menu-view hidden">
+        <header class="menu-meta-head">
+          <button id="btnMetaBack" class="btn small" type="button" title="Back">&#8592;</button>
+          <h2>Character Upgrades</h2>
+          <div class="menu-credits" id="menuCreditsMeta">0 Credits</div>
+        </header>
+        <p class="menu-meta-hint">Permanent bonuses for every run.</p>
+        <div id="metaStats" class="meta-stats"></div>
+        <div class="meta-refund-row">
+          <button id="btnMetaRefund" class="btn ghost meta-refund" type="button" title="Reset all upgrades and refund credits spent">
+            Full Refund (<span id="metaRefundAmount">0</span> cr)
+          </button>
+        </div>
+        <div id="metaList" class="meta-list"></div>
+      </div>
+      <div id="menuGlossary" class="menu-view hidden">
+        <header class="menu-meta-head">
+          <button id="btnGlossaryBack" class="btn small" type="button" title="Back">&#8592;</button>
+          <h2>Glossary</h2>
+          <div class="menu-credits glossary-count" id="glossaryCount"></div>
+        </header>
+        <div class="glossary-tabs" role="tablist">
+          <button id="glossaryTabBeasts" class="glossary-tab active" type="button" data-glossary="beasts">Beasts</button>
+          <button id="glossaryTabCards" class="glossary-tab" type="button" data-glossary="cards">Cards</button>
+          <button id="glossaryTabBuildings" class="glossary-tab" type="button" data-glossary="buildings">Buildings</button>
+        </div>
+        <div id="glossaryList" class="glossary-list"></div>
+      </div>
+      <div class="menu-version-row">
+        <button id="menuVersionBtn" class="menu-version" type="button" disabled title="Current version">
+          <span id="menuVersionLabel"></span>
+          <span id="menuUpdateBadge" class="menu-update-badge hidden">Update available</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <noscript><div class="overlay"><div class="card"><h1>JavaScript required</h1></div></div></noscript>
+
+  <script src="js/utils.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/music.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/meta.js"></script>
+  <script src="js/elements.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/abilities.js"></script>
+  <script src="js/animals.js"></script>
+  <script src="js/weapons.js"></script>
+  <script src="js/base.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
