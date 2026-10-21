@@ -350,12 +350,18 @@ class UI {
       const el = ar.weaponElements[id];
       const elDef = el && ELEMENTS[el];
       const inf = el && ELEMENT_INFUSE[el];
+      const unique = ar.isUnique && ar.isUnique(id);
       const extras = [];
+      if (unique) extras.push('Unique form — stronger stats & elemental look');
       if (elDef) extras.push(elDef.name + (inf ? ': ' + inf.effect : ''));
       return {
-        name: def.name,
-        tag: 'Weapon · Lv ' + lvl + (lvl >= WEAPON_MAX ? ' (MAX)' : ''),
-        desc: def.text[Math.max(0, lvl - 1)] || '',
+        name: ar.displayName ? ar.displayName(id) : def.name,
+        tag: unique
+          ? 'Unique · ' + (elDef ? elDef.name : 'Element')
+          : ('Weapon · Lv ' + lvl + (lvl >= WEAPON_MAX ? ' (MAX)' : '')),
+        desc: unique
+          ? (def.text[WEAPON_MAX - 1] || def.text[def.text.length - 1] || '')
+          : (def.text[Math.max(0, lvl - 1)] || ''),
         extra: extras.join('\n'),
         color: elDef ? elDef.color : '#c98a12',
       };
@@ -910,9 +916,16 @@ class UI {
     for (const id of ar.order) {
       const el = ar.weaponElements[id];
       const elDef = el && ELEMENTS[el];
-      const border = elDef ? ' style="border-color:' + elDef.color + '"' : '';
-      bits.push('<div class="load" data-tip-kind="weapon" data-tip-id="' + id + '"' + border + '>' +
-        (ICONS[id] || '') + '<span>' + ar.weapons[id] + '</span>' +
+      const unique = ar.isUnique && ar.isUnique(id);
+      let style = '';
+      if (elDef) {
+        style = 'border-color:' + elDef.color;
+        if (unique) style += '; box-shadow:0 0 8px ' + elDef.color;
+      }
+      bits.push('<div class="load' + (unique ? ' unique' : '') + '" data-tip-kind="weapon" data-tip-id="' + id + '"' +
+        (style ? ' style="' + style + '"' : '') + '>' +
+        (ICONS[id] || '') +
+        '<span>' + (unique ? '★' : ar.weapons[id]) + '</span>' +
         (elDef ? '<i class="el-dot" style="background:' + elDef.color + '"></i>' : '') + '</div>');
     }
     for (const id in ar.passives) {
@@ -959,13 +972,21 @@ class UI {
   }
 
   cardCopy(card) {
+    const ar = this.game.arsenal;
     if (card.kind === 'weapon') {
       const def = WEAPON_DEFS[card.id];
+      const willUnique = card.level >= WEAPON_MAX && ar.elementOf(card.id);
+      const uniqName = willUnique ? uniqueWeaponName(card.id, ar.elementOf(card.id)) : null;
       return {
-        name: def.name,
-        tag: card.level + '/' + WEAPON_MAX,
-        desc: def.text[card.level - 1] || '',
+        name: uniqName || def.name,
+        tag: willUnique ? 'UNIQUE' : (card.level + '/' + WEAPON_MAX),
+        desc: willUnique
+          ? ('Awakens as ' + uniqName + ' — stronger stats & elemental look.')
+          : (def.text[card.level - 1] || ''),
         icon: ICONS[card.id],
+        color: willUnique && ELEMENTS[ar.elementOf(card.id)]
+          ? ELEMENTS[ar.elementOf(card.id)].color
+          : undefined,
       };
     }
     if (card.kind === 'passive') {
@@ -982,10 +1003,16 @@ class UI {
       const wpn = WEAPON_DEFS[card.id];
       const inf = ELEMENT_INFUSE[card.element];
       const iconKey = { fire: 'ember', water: 'tide', nature: 'bloom', earth: 'quake', light: 'radiance', darkness: 'umbra' }[card.element];
+      const atMax = ar.level(card.id) >= WEAPON_MAX;
+      const uniqName = atMax ? uniqueWeaponName(card.id, card.element) : null;
       return {
-        name: inf.name,
-        tag: '1/1 · ' + wpn.name + ' → ' + el.name,
-        desc: inf.effect,
+        name: uniqName || inf.name,
+        tag: atMax
+          ? ('UNIQUE · ' + wpn.name + ' → ' + el.name)
+          : ('1/1 · ' + wpn.name + ' → ' + el.name),
+        desc: atMax
+          ? ('Unlocks ' + uniqName + '. ' + inf.effect)
+          : inf.effect,
         icon: ICONS[iconKey] || ICONS.ember,
         color: el.color,
       };
@@ -1544,13 +1571,22 @@ class UI {
       if (s.pierce != null) bits.push('pierce ' + s.pierce);
       return bits.join(' · ') || '—';
     };
+    const uniques = (typeof UNIQUE_NAMES !== 'undefined' && UNIQUE_NAMES[id])
+      ? ELEMENT_IDS.map((el) => {
+          const nm = UNIQUE_NAMES[id][el];
+          const col = ELEMENTS[el] ? ELEMENTS[el].color : '#fff';
+          return '<span class="glossary-tag" style="border-color:' + col + ';color:' + col + '">' + nm + '</span>';
+        }).join('')
+      : '';
     return (
       '<div class="glossary-card">' +
         '<div class="glossary-icon">' + (ICONS[id] || ICONS.weapon || '') + '</div>' +
         '<div class="glossary-body">' +
           '<div class="glossary-title"><span class="glossary-name">' + def.name + '</span>' +
             '<span class="glossary-tag">Max ' + WEAPON_MAX + '</span></div>' +
-          '<div class="glossary-desc">' + (def.text[0] || '') + '</div>' +
+          '<div class="glossary-desc">' + (def.text[0] || '') +
+            ' At max level + infusion, awakens into a unique elemental form.</div>' +
+          (uniques ? '<div class="glossary-unique-row">' + uniques + '</div>' : '') +
           '<div class="glossary-stats">' +
             this.glossaryStat('Lv1', fmt(s1)) +
             this.glossaryStat('Lv' + WEAPON_MAX, fmt(sm)) +

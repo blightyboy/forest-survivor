@@ -352,6 +352,11 @@ html, body {
   border: 1.5px solid #5a3a06;
 }
 .load.pass { border-color: rgba(126, 224, 255, 0.35); }
+.load.unique span {
+  background: #ffe08a;
+  color: #3a2402;
+  box-shadow: 0 0 6px rgba(255, 224, 138, 0.55);
+}
 .load .el-dot {
   position: absolute;
   left: -4px;
@@ -1201,6 +1206,12 @@ body.in-menu #bossHud { visibility: hidden; pointer-events: none; }
   line-height: 1.4;
   opacity: 0.88;
   font-weight: 600;
+}
+.glossary-unique-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0 4px;
 }
 .glossary-card {
   display: grid;

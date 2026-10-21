@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.1.21-alpha-build`
+Version: `0.1.22-alpha-build`
 
 A top-down survival action game: play as a lumberjack in a hostile forest. Chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids, assault waves, minibosses, and true bosses.
 
@@ -44,6 +44,7 @@ Runs start with **Palisade level 1**.
 ### Combat systems
 
 - **Auto weapons** — orbiting axes, throwing hatchets, saws, auras, and more; level them via cards.
+- **Unique weapons** — at max level (8/8) with an element infusion, a weapon awakens into a named unique form (one per weapon×element) with stronger stats and elemental visuals.
 - **Elements** — fire, water, nature, earth, light, darkness. Infuse weapons; matchups matter against elemental beasts.
 - **Veterancy** — bronze → silver → gold stars (5 each) raise HP, damage, XP, and loot.
 - **Power-ups** — magnet, fury, regen, haste, rare nuke orbs on the map.
@@ -116,7 +117,7 @@ Outputs (under `dist/`):
 
 Build scripts back up and restore `save.json` so rebuilds do not wipe progress.
 
-Windows builds embed `build/icon.ico` into the game `.exe` (generated from `icon.png` via `npm run icon`). Code signing is disabled (`win.sign: false`) so local builds do not need a certificate; executable resources (icon + metadata) are still applied.
+Windows builds embed `build/icon.ico` into the game `.exe` (generated from `icon.png` via `npm run icon`). Code signing is disabled (`win.sign: false` / `signAndEditExecutable: false`) so local builds do not need a certificate or Windows symlink privileges; an `afterPack` hook stamps the icon with `rcedit`.
 
 ### Auto-update (GitHub releases)
 

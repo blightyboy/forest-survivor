@@ -1,7 +1,7 @@
 {
   "name": "forest-survivor",
   "productName": "Forest Survivor",
-  "version": "0.1.21-alpha-build",
+  "version": "0.1.22-alpha-build",
   "description": "Chop, hunt, and fortify your forest camp.",
   "main": "electron/main.js",
   "author": "Forest Survivor",
@@ -9,10 +9,10 @@
   "scripts": {
     "start": "electron .",
     "icon": "node electron/make-icon.js",
-    "build": "node electron/make-icon.js && node electron/preserve-save.js backup && electron-builder --win && node electron/preserve-save.js restore",
-    "build:dir": "node electron/make-icon.js && node electron/preserve-save.js backup && electron-builder --win --dir && node electron/preserve-save.js restore",
-    "build:portable": "node electron/make-icon.js && node electron/preserve-save.js backup && electron-builder --win portable && node electron/preserve-save.js restore",
-    "release": "node electron/make-icon.js && electron-builder --win --publish always"
+    "build": "node electron/make-icon.js && node electron/preserve-save.js backup && node electron/run-builder.js --win && node electron/preserve-save.js restore",
+    "build:dir": "node electron/make-icon.js && node electron/preserve-save.js backup && node electron/run-builder.js --win --dir && node electron/preserve-save.js restore",
+    "build:portable": "node electron/make-icon.js && node electron/preserve-save.js backup && node electron/run-builder.js --win portable && node electron/preserve-save.js restore",
+    "release": "node electron/make-icon.js && node electron/run-builder.js --win --publish always"
   },
   "build": {
     "appId": "com.forestsurvivor.game",
@@ -23,6 +23,7 @@
       "buildResources": "build"
     },
     "icon": "build/icon.ico",
+    "afterPack": "./electron/after-pack.js",
     "files": [
       "index.html",
       "style.css",
@@ -35,6 +36,7 @@
     "win": {
       "icon": "build/icon.ico",
       "sign": false,
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "portable",
@@ -73,7 +75,8 @@
   },
   "devDependencies": {
     "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "rcedit": "^5.0.2"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"

@@ -157,6 +157,149 @@ const WEAPON_DEFS = {
   },
 };
 
+/**
+ * Unique weapons unlock when a weapon reaches WEAPON_MAX and has an element
+ * infusion. Every weapon × element pair has its own name and look.
+ */
+const UNIQUE_NAMES = {
+  axe: {
+    fire: 'Solar Guillotine', water: 'Maelstrom Axes', nature: 'Thorn Orbit',
+    earth: 'Stone Cyclone', light: 'Dawn Wheels', darkness: 'Void Orbit',
+  },
+  hatchet: {
+    fire: 'Cinder Hatchets', water: 'Riptide Hatchets', nature: 'Briar Hatchets',
+    earth: 'Obsidian Hatchets', light: 'Sunshard Hatchets', darkness: 'Nightcleavers',
+  },
+  saw: {
+    fire: 'Magma Disc', water: 'Tide Saw', nature: 'Bloomsaw',
+    earth: 'Quake Blade', light: 'Halo Saw', darkness: 'Umbra Disc',
+  },
+  aura: {
+    fire: 'Inferno Halo', water: 'Abyss Ring', nature: 'Grove Pulse',
+    earth: 'Tremor Field', light: 'Radiant Corona', darkness: 'Eclipse Aura',
+  },
+  dynamite: {
+    fire: 'Napalm Charge', water: 'Depth Charge', nature: 'Seedbomb',
+    earth: 'Faultline Stick', light: 'Starburst Charge', darkness: 'Void Charge',
+  },
+  pike: {
+    fire: 'Brandlance', water: 'Trident Pike', nature: 'Root Spear',
+    earth: 'Earthen Pike', light: 'Lumen Lance', darkness: 'Shadow Pike',
+  },
+  crossbow: {
+    fire: 'Emberbolt', water: 'Frostbolt', nature: 'Thornbolt',
+    earth: 'Stonebolt', light: 'Sunbolt', darkness: 'Nightbolt',
+  },
+  spikes: {
+    fire: 'Cinder Spikes', water: 'Ice Caltraps', nature: 'Thorn Ring',
+    earth: 'Quill Stones', light: 'Solar Spikes', darkness: 'Umbral Spikes',
+  },
+  hammerfall: {
+    fire: 'Meteor Hammer', water: 'Tidefall', nature: 'Oakcrush',
+    earth: 'Mountain Drop', light: 'Judgment Hammer', darkness: 'Abyss Drop',
+  },
+  longbow: {
+    fire: 'Phoenix Bow', water: 'Seabow', nature: 'Worldroot Bow',
+    earth: 'Golem Bow', light: 'Astral Bow', darkness: 'Wraith Bow',
+  },
+  knife: {
+    fire: 'Cinder Knives', water: 'Ice Needles', nature: 'Leafblades',
+    earth: 'Flint Knives', light: 'Prism Knives', darkness: 'Shade Knives',
+  },
+  guarddog: {
+    fire: 'Hellhound', water: 'Tide Hound', nature: 'Mosswolf',
+    earth: 'Stonefang', light: 'Lightfang', darkness: 'Shade Hound',
+  },
+};
+
+/** Paint kit per element for unique weapon visuals. */
+const ELEMENT_WEAPON_STYLE = {
+  fire: { metal: '#ff8a4a', wood: '#5a2210', accent: '#ffe066', glow: 'rgba(255,106,61,0.55)', trail: '#ff6a3d' },
+  water: { metal: '#9ad4ff', wood: '#1e3a55', accent: '#e8f6ff', glow: 'rgba(77,184,255,0.55)', trail: '#4db8ff' },
+  nature: { metal: '#8fd98a', wood: '#2a4a1a', accent: '#d4ffc8', glow: 'rgba(109,212,106,0.55)', trail: '#6dd46a' },
+  earth: { metal: '#d4b878', wood: '#4a3420', accent: '#f0e0b0', glow: 'rgba(196,163,90,0.55)', trail: '#c4a35a' },
+  light: { metal: '#fff3a0', wood: '#6a5a20', accent: '#ffffff', glow: 'rgba(255,230,109,0.6)', trail: '#ffe66d' },
+  darkness: { metal: '#b89ae8', wood: '#2a1a3a', accent: '#e0d0ff', glow: 'rgba(155,123,222,0.55)', trail: '#9b7bde' },
+};
+
+/** Flat unique-form multipliers applied on top of max-level stats. */
+const UNIQUE_STAT_MULT = {
+  dmg: 1.3,
+  area: 1.2,
+  range: 1.15,
+  speed: 1.1,
+  cd: 0.85,
+  size: 1.18,
+  radius: 1.2,
+  pierce: 1,
+  count: 0,
+};
+
+function uniqueWeaponName(weaponId, element) {
+  const row = UNIQUE_NAMES[weaponId];
+  return (row && row[element]) || null;
+}
+
+function weaponDrawStyle(element, unique, flash) {
+  if (flash) {
+    return { metal: '#fff', wood: '#fff', accent: '#fff', glow: null, trail: '#fff', unique: false, scale: 1 };
+  }
+  if (unique && element && ELEMENT_WEAPON_STYLE[element]) {
+    const s = ELEMENT_WEAPON_STYLE[element];
+    return { metal: s.metal, wood: s.wood, accent: s.accent, glow: s.glow, trail: s.trail, unique: true, scale: 1.12 };
+  }
+  return { metal: '#c3ced6', wood: '#9a6232', accent: '#e9eef2', glow: null, trail: null, unique: false, scale: 1 };
+}
+
+function applyUniqueStats(s, weaponId) {
+  if (!s) return s;
+  const out = Object.assign({}, s);
+  if (out.dmg != null) out.dmg = Math.round(out.dmg * UNIQUE_STAT_MULT.dmg);
+  if (out.range != null) out.range = Math.round(out.range * UNIQUE_STAT_MULT.range);
+  if (out.speed != null && weaponId !== 'axe') out.speed = Math.round(out.speed * UNIQUE_STAT_MULT.speed);
+  if (out.speed != null && weaponId === 'axe') out.speed *= UNIQUE_STAT_MULT.speed;
+  if (out.cd != null) out.cd *= UNIQUE_STAT_MULT.cd;
+  if (out.size != null) out.size *= UNIQUE_STAT_MULT.size;
+  if (out.radius != null) out.radius = Math.round(out.radius * UNIQUE_STAT_MULT.radius);
+  if (out.dist != null) out.dist = Math.round(out.dist * UNIQUE_STAT_MULT.range);
+  if (out.len != null) out.len = Math.round(out.len * UNIQUE_STAT_MULT.area);
+  if (out.orbit != null) out.orbit = Math.round(out.orbit * UNIQUE_STAT_MULT.area);
+  if (out.cone != null) out.cone *= 1.15;
+  if (out.pierce != null) out.pierce += 1;
+  if (out.count != null && (weaponId === 'hatchet' || weaponId === 'knife' || weaponId === 'crossbow')) {
+    out.count += 1;
+  }
+  if (out.biteCd != null) out.biteCd *= 0.85;
+  if (out.tick != null) out.tick *= 0.85;
+  return out;
+}
+
+function attachWeaponOpts(obj, opts) {
+  const o = opts || {};
+  obj.element = o.element || null;
+  obj.unique = !!o.unique;
+  obj.style = o.style || weaponDrawStyle(obj.element, obj.unique, false);
+}
+
+/** Soft elemental glow behind a unique projectile. */
+function drawUniqueGlow(ctx, x, y, r, style) {
+  if (!style || !style.unique || !style.glow) return;
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  ctx.fillStyle = style.glow;
+  ellipse(ctx, x, y, r, r * 0.7);
+  ctx.fill();
+  ctx.restore();
+}
+
+function hexRgba(hex, a) {
+  if (!hex || hex[0] !== '#') return 'rgba(255,255,255,' + a + ')';
+  const h = hex.slice(1);
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = parseInt(full, 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+
 const PASSIVE_DEFS = {
   might: { name: 'Whetstone', desc: '+15% damage', max: 5 },
   haste: { name: 'Strong Coffee', desc: 'Weapons fire 7% faster, axes spin 8% faster', max: 5 },
@@ -247,7 +390,7 @@ function computePlayerStats(P, gear = null, level = 1, permBonus = null) {
 // ===========================================================================
 
 class Hatchet {
-  constructor(x, y, angle, s) {
+  constructor(x, y, angle, s, opts) {
     this.x = x; this.y = y;
     this.vx = Math.cos(angle) * s.speed;
     this.vy = Math.sin(angle) * s.speed;
@@ -258,6 +401,7 @@ class Hatchet {
     this.dead = false;
     this.hit = new Set();
     this.weaponId = 'hatchet';
+    attachWeaponOpts(this, opts);
   }
 
   update(dt, game) {
@@ -286,12 +430,13 @@ class Hatchet {
   }
 
   draw(ctx) {
-    drawAxe(ctx, this.x, this.y - 20, this.spin, 0.85, false);
+    drawUniqueGlow(ctx, this.x, this.y - 16, 16, this.style);
+    drawAxe(ctx, this.x, this.y - 20, this.spin, 0.85 * (this.style && this.style.scale || 1), false, this.style);
   }
 }
 
 class SawBlade {
-  constructor(x, y, angle, s) {
+  constructor(x, y, angle, s, opts) {
     this.x = x; this.y = y;
     this.dirX = Math.cos(angle); this.dirY = Math.sin(angle);
     this.dmg = s.dmg;
@@ -305,6 +450,7 @@ class SawBlade {
     this.dead = false;
     this.hits = new Map();
     this.weaponId = 'saw';
+    attachWeaponOpts(this, opts);
   }
 
   update(dt, game) {
@@ -347,6 +493,8 @@ class SawBlade {
 
   draw(ctx) {
     const r = this.size;
+    const st = this.style || weaponDrawStyle(null, false, false);
+    drawUniqueGlow(ctx, this.x, this.y - 14, r * 1.2, st);
     ctx.save();
     ctx.translate(this.x, this.y - 16);
     ctx.scale(1, 0.62);
@@ -358,16 +506,16 @@ class SawBlade {
       ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
     }
     ctx.closePath();
-    ctx.fillStyle = '#c3ced6';
+    ctx.fillStyle = st.metal;
     ctx.fill();
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 1.6;
     ctx.stroke();
-    ctx.fillStyle = '#e9eef2';
+    ctx.fillStyle = st.accent;
     ellipse(ctx, 0, 0, r * 0.6, r * 0.6); ctx.fill();
-    ctx.fillStyle = '#5d6b75';
+    ctx.fillStyle = st.wood;
     ellipse(ctx, 0, 0, r * 0.2, r * 0.2); ctx.fill();
-    ctx.strokeStyle = 'rgba(93,107,117,0.8)';
+    ctx.strokeStyle = st.trail || 'rgba(93,107,117,0.8)';
     ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.moveTo(-r * 0.45, 0); ctx.lineTo(r * 0.45, 0); ctx.stroke();
     ctx.restore();
@@ -375,7 +523,7 @@ class SawBlade {
 }
 
 class Dynamite {
-  constructor(x, y, tx, ty, s, radius) {
+  constructor(x, y, tx, ty, s, radius, opts) {
     this.x0 = x; this.y0 = y;
     this.tx = tx; this.ty = ty;
     this.x = x; this.y = y; this.z = 20;
@@ -386,6 +534,7 @@ class Dynamite {
     this.spin = 0;
     this.dead = false;
     this.weaponId = 'dynamite';
+    attachWeaponOpts(this, opts);
   }
 
   update(dt, game) {
@@ -412,25 +561,27 @@ class Dynamite {
   }
 
   draw(ctx) {
+    const st = this.style || weaponDrawStyle(null, false, false);
+    drawUniqueGlow(ctx, this.x, this.y - this.z, 14, st);
     ctx.save();
     ctx.translate(this.x, this.y - this.z);
     ctx.rotate(this.spin);
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 1.5;
     roundRectPath(ctx, -3.5, -9, 7, 18, 2);
-    ctx.fillStyle = '#e5484d'; ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#5a3a22';
+    ctx.fillStyle = st.unique ? st.metal : '#e5484d'; ctx.fill(); ctx.stroke();
+    ctx.fillStyle = st.wood;
     ctx.fillRect(-3.5, -2, 7, 3);
     ctx.strokeStyle = '#2a1b12';
     ctx.beginPath(); ctx.moveTo(0, -9); ctx.quadraticCurveTo(2, -13, 5, -13); ctx.stroke();
-    ctx.fillStyle = '#ffe066';
+    ctx.fillStyle = st.accent;
     ellipse(ctx, 5, -13, 2.2, 2.2); ctx.fill();
     ctx.restore();
   }
 }
 
 class Pike {
-  constructor(x, y, angle, s) {
+  constructor(x, y, angle, s, opts) {
     this.x = x; this.y = y;
     this.angle = angle;
     this.vx = Math.cos(angle) * s.speed;
@@ -442,6 +593,7 @@ class Pike {
     this.dead = false;
     this.hit = new Set();
     this.weaponId = 'pike';
+    attachWeaponOpts(this, opts);
   }
 
   update(dt, game) {
@@ -473,16 +625,18 @@ class Pike {
   }
 
   draw(ctx) {
+    const st = this.style || weaponDrawStyle(null, false, false);
+    drawUniqueGlow(ctx, this.x, this.y - 10, 18, st);
     ctx.save();
     ctx.translate(this.x, this.y - 10);
     ctx.rotate(this.angle);
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 3.2;
     ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(this.len * 0.55, 0); ctx.stroke();
-    ctx.strokeStyle = '#9a6232';
+    ctx.strokeStyle = st.wood;
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(this.len * 0.55, 0); ctx.stroke();
-    ctx.fillStyle = '#c3ced6';
+    ctx.fillStyle = st.metal;
     ctx.beginPath();
     ctx.moveTo(this.len * 0.55, 0); ctx.lineTo(this.len * 0.55 - 10, -5); ctx.lineTo(this.len * 0.72, 0); ctx.lineTo(this.len * 0.55 - 10, 5);
     ctx.closePath(); ctx.fill();
@@ -492,7 +646,7 @@ class Pike {
 }
 
 class FallingHammer {
-  constructor(tx, ty, s) {
+  constructor(tx, ty, s, opts) {
     this.tx = tx; this.ty = ty;
     this.x = tx; this.y = ty;
     this.z = 200 + rand(0, 40);
@@ -503,6 +657,7 @@ class FallingHammer {
     this.hit = false;
     this.age = 0;
     this.weaponId = 'hammerfall';
+    attachWeaponOpts(this, opts);
   }
 
   update(dt, game) {
@@ -538,21 +693,23 @@ class FallingHammer {
   }
 
   draw(ctx) {
+    const st = this.style || weaponDrawStyle(null, false, false);
+    drawUniqueGlow(ctx, this.x, this.y - this.z, 20, st);
     ctx.save();
     ctx.translate(this.x, this.y - this.z - 8);
     ctx.rotate(this.spin);
-    ctx.fillStyle = '#6a7076';
+    ctx.fillStyle = st.metal;
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 1.5;
     roundRectPath(ctx, -11, -7, 22, 12, 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#8a5a2e';
+    ctx.fillStyle = st.wood;
     roundRectPath(ctx, -3, 4, 6, 16, 1.5); ctx.fill(); ctx.stroke();
     ctx.restore();
   }
 }
 
 class Knife {
-  constructor(x, y, angle, s) {
+  constructor(x, y, angle, s, opts) {
     this.x = x; this.y = y;
     this.vx = Math.cos(angle) * s.speed;
     this.vy = Math.sin(angle) * s.speed;
@@ -564,6 +721,7 @@ class Knife {
     this.dead = false;
     this.hit = new Set();
     this.weaponId = 'knife';
+    attachWeaponOpts(this, opts);
   }
 
   update(dt, game) {
@@ -592,16 +750,18 @@ class Knife {
   }
 
   draw(ctx) {
+    const st = this.style || weaponDrawStyle(null, false, false);
+    drawUniqueGlow(ctx, this.x, this.y - 8, 12, st);
     ctx.save();
     ctx.translate(this.x, this.y - 10);
     ctx.rotate(this.angle + this.spin * 0.15);
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 1.4;
-    ctx.fillStyle = '#dfe7ec';
+    ctx.fillStyle = st.metal;
     ctx.beginPath();
     ctx.moveTo(12, 0); ctx.lineTo(-2, -3.5); ctx.lineTo(-6, 0); ctx.lineTo(-2, 3.5);
     ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#8a5a2e';
+    ctx.fillStyle = st.wood;
     roundRectPath(ctx, -12, -2, 7, 4, 1); ctx.fill(); ctx.stroke();
     ctx.restore();
   }
@@ -699,22 +859,25 @@ class GuardDog {
   draw(ctx) {
     if (!this.alive) return;
     const flash = this.flash > 0;
+    const ar = this.game.arsenal;
+    const st = ar ? ar.drawStyle('guarddog', flash) : weaponDrawStyle(null, false, flash);
+    if (st.unique) drawUniqueGlow(ctx, this.x, this.y - 4, 18, st);
     ctx.save();
     ctx.translate(this.x, this.y);
-    ctx.scale(this.facing, 1);
+    ctx.scale(this.facing * (st.unique ? 1.12 : 1), st.unique ? 1.08 : 1);
     const bob = Math.sin(this.walk) * 1.5;
     ctx.translate(0, -6 + bob);
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 1.5;
-    ctx.fillStyle = flash ? '#fff' : '#c4a574';
+    ctx.fillStyle = flash ? '#fff' : (st.unique ? st.metal : '#c4a574');
     // body
     ellipse(ctx, 0, 0, 11, 7); ctx.fill(); ctx.stroke();
     // head
     ellipse(ctx, 12, -3, 6.5, 5.5); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = flash ? '#fff' : '#2a1b12';
+    ctx.fillStyle = flash ? '#fff' : (st.unique ? st.accent : '#2a1b12');
     ellipse(ctx, 15.5, -4.5, 1.3, 1.3); ctx.fill();
     // ear
-    ctx.fillStyle = flash ? '#fff' : '#a88858';
+    ctx.fillStyle = flash ? '#fff' : (st.unique ? st.wood : '#a88858');
     ctx.beginPath(); ctx.moveTo(8, -7); ctx.lineTo(11, -14); ctx.lineTo(13, -6); ctx.closePath();
     ctx.fill(); ctx.stroke();
     // legs
@@ -730,7 +893,7 @@ class GuardDog {
 }
 
 class Bolt {
-  constructor(x, y, angle, s, weaponId = 'crossbow') {
+  constructor(x, y, angle, s, weaponId = 'crossbow', opts) {
     this.x = x; this.y = y;
     this.vx = Math.cos(angle) * s.speed;
     this.vy = Math.sin(angle) * s.speed;
@@ -741,6 +904,7 @@ class Bolt {
     this.dead = false;
     this.hit = new Set();
     this.weaponId = weaponId;
+    attachWeaponOpts(this, opts);
   }
 
   update(dt, game) {
@@ -768,15 +932,17 @@ class Bolt {
   }
 
   draw(ctx) {
+    const st = this.style || weaponDrawStyle(null, false, false);
+    drawUniqueGlow(ctx, this.x, this.y - 10, 14, st);
     ctx.save();
     ctx.translate(this.x, this.y - 12);
     ctx.rotate(this.angle);
-    ctx.strokeStyle = '#6b4022';
+    ctx.strokeStyle = st.wood;
     ctx.lineWidth = 2.2;
     ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(8, 0); ctx.stroke();
-    ctx.fillStyle = '#c3ced6';
+    ctx.fillStyle = st.metal;
     ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(6, -3.2); ctx.lineTo(6, 3.2); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#e5484d';
+    ctx.fillStyle = st.unique ? st.accent : '#e5484d';
     ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(-16, -3); ctx.lineTo(-10, 0); ctx.lineTo(-16, 3); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
@@ -883,8 +1049,25 @@ class Arsenal {
   }
 
   level(id) { return this.weapons[id] || 0; }
-  stats(id) { return WEAPON_DEFS[id].stats(this.weapons[id]); }
   elementOf(id) { return this.weaponElements[id] || null; }
+  isUnique(id) { return this.level(id) >= WEAPON_MAX && !!this.elementOf(id); }
+  uniqueName(id) {
+    const el = this.elementOf(id);
+    return el ? uniqueWeaponName(id, el) : null;
+  }
+  displayName(id) {
+    return this.uniqueName(id) || (WEAPON_DEFS[id] && WEAPON_DEFS[id].name) || id;
+  }
+  drawStyle(id, flash) {
+    return weaponDrawStyle(this.elementOf(id), this.isUnique(id), flash);
+  }
+  stats(id) {
+    const base = WEAPON_DEFS[id].stats(this.weapons[id]);
+    return this.isUnique(id) ? applyUniqueStats(base, id) : base;
+  }
+  fireOpts(id) {
+    return { element: this.elementOf(id), unique: this.isUnique(id), style: this.drawStyle(id) };
+  }
 
   /** True if the player currently deals this element (weapon infusion or gear). */
   usesElement(el) {
@@ -918,6 +1101,7 @@ class Arsenal {
   }
 
   apply(card) {
+    const beforeUnique = card && card.id ? this.isUnique(card.id) : false;
     if (card.kind === 'weapon') {
       if (!this.weapons[card.id]) {
         this.order.push(card.id);
@@ -933,6 +1117,14 @@ class Arsenal {
     }
     this.version++;
     this.game.syncPlayerStats();
+    if (card && card.id && !beforeUnique && this.isUnique(card.id)) {
+      const name = this.uniqueName(card.id);
+      const el = this.elementOf(card.id);
+      const col = (el && ELEMENTS[el] && ELEMENTS[el].color) || '#ffe08a';
+      this.game.ui.banner('Unique unlocked!', name, col);
+      Sound.play('upgrade', 0.7);
+      this.game.fx.sparkle(this.game.player.x, this.game.player.y, col);
+    }
   }
 
   /** Up to `n` distinct, weighted-random upgrade offers. */
@@ -1089,6 +1281,7 @@ class Arsenal {
 
   fire(id) {
     const g = this.game, p = g.player, s = this.stats(id);
+    const opts = this.fireOpts(id);
     const count = s.count + g.ps.amount;
     if (id === 'hatchet') {
       const targets = this.aimTargets(p.x, p.y, s.range, count);
@@ -1097,7 +1290,7 @@ class Arsenal {
         const t = targets[i % targets.length];
         const spread = i >= targets.length ? (i - targets.length + 1) * 0.22 * (i % 2 ? 1 : -1) : 0;
         const ang = Math.atan2(t.y - t.bodyOff - (p.y - 4), t.x - p.x) + spread;
-        this.projectiles.push(new Hatchet(p.x, p.y - 4, ang, s));
+        this.projectiles.push(new Hatchet(p.x, p.y - 4, ang, s, opts));
       }
       Sound.play('throw');
       return true;
@@ -1110,7 +1303,7 @@ class Arsenal {
       const sz = Object.assign({}, s, { size: s.size * g.ps.area, dist: s.dist * g.ps.area });
       for (let i = 0; i < count; i++) {
         const off = count === 1 ? 0 : (i / count) * TAU;
-        this.projectiles.push(new SawBlade(p.x, p.y, base + off, sz));
+        this.projectiles.push(new SawBlade(p.x, p.y, base + off, sz, opts));
       }
       Sound.play('throw', 0.7);
       return true;
@@ -1119,7 +1312,7 @@ class Arsenal {
       const ang = this.aimAngle(true);
       for (let i = 0; i < count; i++) {
         const spread = count === 1 ? 0 : (i - (count - 1) / 2) * 0.28;
-        this.projectiles.push(new Pike(p.x, p.y - 4, ang + spread, s));
+        this.projectiles.push(new Pike(p.x, p.y - 4, ang + spread, s, opts));
       }
       Sound.play('throw', 1.2);
       return true;
@@ -1131,7 +1324,7 @@ class Arsenal {
         const t = targets[i % targets.length];
         const spread = i >= targets.length ? (i - targets.length + 1) * 0.18 * (i % 2 ? 1 : -1) : 0;
         const ang = Math.atan2(t.y - t.bodyOff - (p.y - 8), t.x - p.x) + spread;
-        this.projectiles.push(new Bolt(p.x, p.y - 8, ang, s));
+        this.projectiles.push(new Bolt(p.x, p.y - 8, ang, s, 'crossbow', opts));
       }
       Sound.play('bow');
       return true;
@@ -1148,7 +1341,7 @@ class Arsenal {
           : targets[Math.floor(Math.random() * targets.length)];
         const scatter = t === lock ? rand(-8, 8) : rand(-20, 20);
         const tx = t.x + t.vx * 0.5 + scatter, ty = t.y + t.vy * 0.5 + scatter;
-        this.projectiles.push(new Dynamite(p.x, p.y, tx, ty, s, radius));
+        this.projectiles.push(new Dynamite(p.x, p.y, tx, ty, s, radius, opts));
       }
       Sound.play('throw', 0.55);
       return true;
@@ -1160,7 +1353,7 @@ class Arsenal {
       for (let i = 0; i < count; i++) {
         const t = pool[Math.floor(Math.random() * pool.length)];
         const tx = t.x + rand(-18, 18), ty = t.y + rand(-12, 12);
-        this.projectiles.push(new FallingHammer(tx, ty, smash));
+        this.projectiles.push(new FallingHammer(tx, ty, smash, opts));
       }
       Sound.play('throw', 0.45);
       return true;
@@ -1172,7 +1365,7 @@ class Arsenal {
         const t = targets[i % targets.length];
         const spread = i >= targets.length ? (i - targets.length + 1) * 0.12 * (i % 2 ? 1 : -1) : 0;
         const ang = Math.atan2(t.y - t.bodyOff - (p.y - 8), t.x - p.x) + spread;
-        this.projectiles.push(new Bolt(p.x, p.y - 8, ang, s, 'longbow'));
+        this.projectiles.push(new Bolt(p.x, p.y - 8, ang, s, 'longbow', opts));
       }
       Sound.play('bow', 0.75);
       return true;
@@ -1186,7 +1379,7 @@ class Arsenal {
       for (let i = 0; i < count; i++) {
         const t = i / Math.max(1, count - 1);
         const ang = base + (t - 0.5) * cone * 2 + rand(-0.04, 0.04);
-        this.projectiles.push(new Knife(p.x, p.y - 4, ang, s));
+        this.projectiles.push(new Knife(p.x, p.y - 4, ang, s, opts));
       }
       Sound.play('throw', 1.25);
       return true;
@@ -1369,11 +1562,18 @@ class Arsenal {
     if (this.level('spikes')) this.drawSpikes(ctx, p);
     if (!this.level('aura')) return;
     const r = this.auraR, t = g.time;
+    const st = this.drawStyle('aura');
     const glow = 0.16 + (this.auraFlash > 0 ? 0.1 : 0) + Math.sin(t * 6) * 0.03;
     const grad = ctx.createRadialGradient(p.x, p.y, r * 0.3, p.x, p.y, r);
-    grad.addColorStop(0, 'rgba(255,140,40,0)');
-    grad.addColorStop(0.75, 'rgba(255,120,30,' + (glow * 0.6).toFixed(3) + ')');
-    grad.addColorStop(1, 'rgba(255,90,20,' + glow.toFixed(3) + ')');
+    if (st.unique && st.trail) {
+      grad.addColorStop(0, hexRgba(st.trail, 0));
+      grad.addColorStop(0.75, hexRgba(st.trail, glow * 0.6));
+      grad.addColorStop(1, hexRgba(st.trail, glow));
+    } else {
+      grad.addColorStop(0, 'rgba(255,140,40,0)');
+      grad.addColorStop(0.75, 'rgba(255,120,30,' + (glow * 0.6).toFixed(3) + ')');
+      grad.addColorStop(1, 'rgba(255,90,20,' + glow.toFixed(3) + ')');
+    }
     ctx.fillStyle = grad;
     ellipse(ctx, p.x, p.y, r, r * 0.92);
     ctx.fill();
@@ -1387,7 +1587,9 @@ class Arsenal {
       ctx.quadraticCurveTo(fx - 4, fy - h * 0.5, fx, fy - h);
       ctx.quadraticCurveTo(fx + 4, fy - h * 0.5, fx + 4, fy);
       ctx.closePath();
-      ctx.fillStyle = i % 2 ? 'rgba(255,120,40,0.85)' : 'rgba(255,200,80,0.85)';
+      ctx.fillStyle = st.unique
+        ? (i % 2 ? st.metal : st.accent)
+        : (i % 2 ? 'rgba(255,120,40,0.85)' : 'rgba(255,200,80,0.85)');
       ctx.fill();
     }
   }
@@ -1395,6 +1597,7 @@ class Arsenal {
   drawSpikes(ctx, p) {
     const r = this.spikeR, t = this.game.time;
     const flash = this.spikeFlash > 0;
+    const st = this.drawStyle('spikes', flash);
     const n = Math.max(8, Math.round(r / 9));
     for (let i = 0; i < n; i++) {
       const a = (i / n) * TAU + t * 0.15;
@@ -1404,7 +1607,7 @@ class Arsenal {
       ctx.translate(x, y);
       ctx.rotate(a + Math.PI / 2);
       roundRectPath(ctx, -3.5, -18 * k, 7, 18 * k, 1.5);
-      ctx.fillStyle = flash ? '#fff0c8' : '#9a6232';
+      ctx.fillStyle = flash ? '#fff0c8' : (st.unique ? st.wood : '#9a6232');
       ctx.fill();
       ctx.strokeStyle = OUTLINE;
       ctx.lineWidth = 1.3;
@@ -1412,7 +1615,7 @@ class Arsenal {
       ctx.beginPath();
       ctx.moveTo(-3.5, -18 * k); ctx.lineTo(0, -26 * k); ctx.lineTo(3.5, -18 * k);
       ctx.closePath();
-      ctx.fillStyle = flash ? '#fff' : '#c08850';
+      ctx.fillStyle = flash ? '#fff' : (st.unique ? st.metal : '#c08850');
       ctx.fill(); ctx.stroke();
       ctx.restore();
     }
@@ -1423,19 +1626,22 @@ class Arsenal {
     const p = this.game.player;
     if (!p.alive || !this.axes.length) return;
     const R = this.axeR;
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 2;
+    const st = this.drawStyle('axe');
+    ctx.strokeStyle = st.unique ? (st.glow || 'rgba(255,255,255,0.15)') : 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = st.unique ? 3 : 2;
     ellipse(ctx, p.x, p.y, R, R);
     ctx.stroke();
     const len = clamp(this.axeSpin * 0.09, 0.35, 1.0);
     const segs = 6;
     const inner = p.radius + 4;
     ctx.lineCap = 'round';
+    const trail = st.unique && st.trail ? st.trail : null;
     for (const axe of this.axes) {
       for (let i = 0; i < segs; i++) {
         const a1 = axe.angle - (len * i) / segs;
         const a0 = axe.angle - (len * (i + 1)) / segs;
-        ctx.fillStyle = 'rgba(255,255,255,' + (0.09 * (1 - i / segs)).toFixed(3) + ')';
+        const alpha = 0.09 * (1 - i / segs);
+        ctx.fillStyle = trail ? hexRgba(trail, alpha) : 'rgba(255,255,255,' + alpha.toFixed(3) + ')';
         ctx.beginPath();
         ctx.arc(p.x, p.y, R, a0, a1);
         ctx.arc(p.x, p.y, inner, a1, a0, true);
@@ -1446,7 +1652,7 @@ class Arsenal {
         const a1 = axe.angle - (len * i) / segs;
         const a0 = axe.angle - (len * (i + 1)) / segs;
         const k = 1 - i / segs;
-        ctx.strokeStyle = 'rgba(255,255,255,' + (0.34 * k).toFixed(3) + ')';
+        ctx.strokeStyle = trail ? hexRgba(trail, 0.34 * k) : 'rgba(255,255,255,' + (0.34 * k).toFixed(3) + ')';
         ctx.lineWidth = 10 * k + 1;
         ctx.beginPath();
         ctx.arc(p.x, p.y - AXE_HEIGHT, R, a0, a1);

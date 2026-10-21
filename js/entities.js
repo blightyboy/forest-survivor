@@ -475,7 +475,13 @@ class Player {
 // Axe
 // ===========================================================================
 
-function drawAxe(ctx, x, y, rot, s, flash) {
+function drawAxe(ctx, x, y, rot, s, flash, style) {
+  const st = style || { metal: '#c3ced6', wood: '#9a6232', accent: '#ffffff', unique: false };
+  const wood = flash ? '#fff' : st.wood;
+  const metal = flash ? '#fff' : st.metal;
+  const accent = flash ? '#fff' : (st.accent || '#ffffff');
+  const darkWood = flash ? '#fff' : (st.unique ? st.wood : '#5d3a1a');
+  const poll = flash ? '#fff' : (st.unique ? st.metal : '#7f8a92');
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
@@ -486,16 +492,16 @@ function drawAxe(ctx, x, y, rot, s, flash) {
   ctx.lineWidth = 1.8;
   // handle
   roundRectPath(ctx, -2.3, -15, 4.6, 31, 2.2);
-  ctx.fillStyle = flash ? '#fff' : '#9a6232';
+  ctx.fillStyle = wood;
   ctx.fill(); ctx.stroke();
-  ctx.fillStyle = flash ? '#fff' : '#5d3a1a';
+  ctx.fillStyle = darkWood;
   ctx.fillRect(-2.3, 8, 4.6, 2);
   ctx.fillRect(-2.3, 12, 4.6, 2);
   // poll
   ctx.beginPath();
   ctx.moveTo(-1, -16); ctx.lineTo(-5.5, -15); ctx.lineTo(-5.5, -9); ctx.lineTo(-1, -8);
   ctx.closePath();
-  ctx.fillStyle = flash ? '#fff' : '#7f8a92';
+  ctx.fillStyle = poll;
   ctx.fill(); ctx.stroke();
   // blade
   ctx.beginPath();
@@ -504,14 +510,25 @@ function drawAxe(ctx, x, y, rot, s, flash) {
   ctx.quadraticCurveTo(17, -13, 11, -2);
   ctx.lineTo(1, -8);
   ctx.closePath();
-  ctx.fillStyle = flash ? '#fff' : '#c3ced6';
+  ctx.fillStyle = metal;
   ctx.fill(); ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(10.4, -20.5);
   ctx.quadraticCurveTo(15.6, -13, 10.8, -4);
-  ctx.strokeStyle = '#ffffff';
+  ctx.strokeStyle = accent;
   ctx.lineWidth = 1.8;
   ctx.stroke();
+  if (st.unique && !flash) {
+    ctx.beginPath();
+    ctx.moveTo(4, -18);
+    ctx.lineTo(12, -26);
+    ctx.lineTo(8, -14);
+    ctx.closePath();
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.55;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
   ctx.restore();
 }
 
@@ -530,7 +547,14 @@ class AxeSprite {
     ctx.fill();
   }
   draw(ctx) {
-    drawAxe(ctx, this.x, this.y - AXE_HEIGHT, this.spin, 1.2, this.flash > 0);
+    const ar = typeof window !== 'undefined' && window.game && window.game.arsenal;
+    const flash = this.flash > 0;
+    const st = ar ? ar.drawStyle('axe', flash) : null;
+    const scale = 1.2 * (st && st.unique ? st.scale : 1);
+    if (st && st.unique && typeof drawUniqueGlow === 'function') {
+      drawUniqueGlow(ctx, this.x, this.y - AXE_HEIGHT, 18, st);
+    }
+    drawAxe(ctx, this.x, this.y - AXE_HEIGHT, this.spin, scale, flash, st);
   }
 }
 
