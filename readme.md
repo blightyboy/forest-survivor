@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.1.23-alpha-build`
+Version: `0.1.24-alpha-build`
 
 A top-down survival action game: play as a lumberjack in a hostile forest. Chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids, assault waves, minibosses, and true bosses.
 

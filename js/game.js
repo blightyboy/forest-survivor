@@ -404,6 +404,7 @@ class Game {
     for (let i = 0; i < 5; i++) place(420, 700, 24, (x, y) => new Animal('boar', x, y, this.enemyOpts({ stars: 0 })));
     for (let i = 0; i < 5; i++) place(450, 1100, 22, (x, y) => new Animal('deer', x, y, this.enemyOpts({ stars: 0, element: null })));
     for (let i = 0; i < 4; i++) place(480, 1000, 20, (x, y) => new Animal('fox', x, y, this.enemyOpts({ stars: 0, element: null })));
+    for (let i = 0; i < 6; i++) place(380, 900, 16, (x, y) => new Animal('rat', x, y, this.enemyOpts({ stars: 0, element: null })));
     for (let i = 0; i < 28; i++) {
       place(750, 2200, 30, (x, y, d) => {
         const dire = d > 1400 && rng.chance(0.08);
@@ -414,6 +415,7 @@ class Game {
     }
     for (let i = 0; i < 4; i++) place(1100, 2200, 22, (x, y) => new Animal('deer', x, y, this.enemyOpts({ stars: 0 })));
     for (let i = 0; i < 4; i++) place(1000, 2100, 20, (x, y) => new Animal('fox', x, y, this.enemyOpts({ stars: 0 })));
+    for (let i = 0; i < 8; i++) place(850, 1800, 16, (x, y) => new Animal('rat', x, y, this.enemyOpts({ stars: 0 })));
     for (let i = 0; i < 4; i++) place(900, 1900, 22, (x, y) => new Animal('sheep', x, y, this.enemyOpts({ stars: 0 })));
     for (let i = 0; i < 4; i++) place(950, 2000, 24, (x, y) => new Animal('beaver', x, y, this.enemyOpts({ stars: 0 })));
     for (let i = 0; i < 3; i++) place(1700, 2200, 34, (x, y) => new Animal(rng.chance(0.2) ? 'dire_bear' : 'bear', x, y, this.enemyOpts({})));
@@ -864,11 +866,11 @@ class Game {
 
   /** Species unlocked by threat minutes (variety expands over the run). */
   assaultSpeciesPool(m) {
-    const pool = ['boar'];
-    if (m >= 0.8) pool.push('boar', 'wolf');
-    if (m >= 1.6) pool.push('sheep', 'beaver');
+    const pool = ['boar', 'rat'];
+    if (m >= 0.8) pool.push('boar', 'wolf', 'rat');
+    if (m >= 1.6) pool.push('sheep', 'beaver', 'rat');
     if (m >= 2.5) pool.push('deer', 'fox', 'dire_boar');
-    if (m >= 3.5) pool.push('wolf', 'raccoon', 'duck');
+    if (m >= 3.5) pool.push('wolf', 'raccoon', 'duck', 'rat');
     if (m >= 4.5) pool.push('dire_wolf', 'bear', 'beaver', 'sheep');
     if (m >= 6) pool.push('dire_bear', 'dire_boar', 'dire_wolf');
     if (m >= 8) pool.push('dire_bear', 'bear', 'dire_wolf');
@@ -1199,10 +1201,11 @@ class Game {
         species = (day >= 5 && Math.random() < 0.2) ? 'dire_bear' : 'bear';
       }
     } else {
-      if (r < 0.12) species = 'deer';
-      else if (r < 0.22) species = 'fox';
-      else if (r < 0.34) species = 'sheep';
-      else if (r < 0.46) species = 'beaver';
+      if (r < 0.1) species = 'deer';
+      else if (r < 0.18) species = 'fox';
+      else if (r < 0.28) { species = 'rat'; count = 2 + Math.floor(Math.random() * 3); }
+      else if (r < 0.38) species = 'sheep';
+      else if (r < 0.48) species = 'beaver';
       else if (r < 0.82 || day < 2) species = (day >= 3 && Math.random() < 0.12) ? 'dire_boar' : 'boar';
       else species = (day >= 5 && Math.random() < 0.15) ? 'dire_bear' : 'bear';
     }
@@ -1235,14 +1238,16 @@ class Game {
     const p = this.player;
     const day = this.dayNumber();
     const roll = Math.random();
-    let species = 'squirrel';
-    let label = 'Squirrel Swarm!';
-    let tint = '#e0a060';
-    let pack = 14;
-    if (day >= 3 && roll < 0.34) {
+    let species = 'rat';
+    let label = 'Rat Swarm!';
+    let tint = '#a89078';
+    let pack = 18;
+    if (day >= 3 && roll < 0.28) {
       species = 'raccoon'; label = 'Raccoon Swarm!'; tint = '#c8c4d8'; pack = 10;
-    } else if (roll < 0.62) {
+    } else if (roll < 0.48) {
       species = 'duck'; label = 'Duck Swarm!'; tint = '#6aaa4a'; pack = 16;
+    } else if (roll < 0.72) {
+      species = 'squirrel'; label = 'Squirrel Swarm!'; tint = '#e0a060'; pack = 14;
     }
     const count = Math.min(28, pack + day * 2);
     const t = this.threat();

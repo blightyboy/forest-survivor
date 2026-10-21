@@ -107,7 +107,7 @@ const TUTORIAL_CONTENT = {
         '<li><b>Variants</b> — <b>Dire</b> (darker brutes), <b>Necromantic</b> (undead green-gray), <b>Demonic</b> (red with spikes). Stronger than basic beasts.</li>' +
         '<li><b>Elements</b> — colored beasts lean on fire, water, nature, earth, light, or darkness. Matching your weapon element helps; theirs can resist yours.</li>' +
         '<li><b>Melee</b> — most animals charge and lunge up close.</li>' +
-        '<li><b>Ranged</b> — sheep hurl wool and beavers throw logs while keeping their distance.</li>' +
+        '<li><b>Ranged</b> — sheep hurl wool, raccoons fling rocks, and beavers throw logs while keeping their distance.</li>' +
       '</ul>',
   },
   build: {
@@ -511,35 +511,27 @@ class UI {
     if (!item) { this.hideTip(); return; }
     const equipped = g.shop.equipped[item.slot] || null;
     const slotLab = (SLOT_LABELS[item.slot] || item.slot);
-    const elNew = item.element && ELEMENTS[item.element];
-    const elOld = equipped && equipped.element && ELEMENTS[equipped.element];
 
-    const colHtml = (it, label, elDef) => {
+    const head = (it, label) => {
       if (!it) {
-        return '<div class="tip-compare-col"><div class="tip-compare-lab">' + label + '</div>' +
+        return '<div class="tip-compare-head"><div class="tip-compare-lab">' + label + '</div>' +
           '<div class="tip-compare-empty">Empty slot</div></div>';
       }
-      // Match shop / equipped: rarity colors the quality name; element is separate.
       const rarity = it.color || '#c9a227';
-      const elBit = elDef
-        ? '<br><span style="color:' + elDef.color + '">' + elDef.name + ' element</span>'
-        : '';
-      return '<div class="tip-compare-col"><div class="tip-compare-lab">' + label + '</div>' +
+      return '<div class="tip-compare-head"><div class="tip-compare-lab">' + label + '</div>' +
         '<div class="tip-compare-name"><b style="color:' + rarity + '">' + it.qualityName + '</b> ' +
-          it.name + '</div>' +
-        '<div class="tip-compare-stats">' + it.desc + elBit + '</div></div>';
+          it.name + '</div></div>';
     };
 
-    const deltas = this.gearCompareDeltas(equipped, item);
     tip.innerHTML =
       '<div class="tip-name">' + slotLab + '</div>' +
       '<div class="tip-tag">Hover compare · replaces on buy</div>' +
-      '<div class="tip-compare-grid">' +
-        colHtml(equipped, 'Equipped', elOld) +
+      '<div class="tip-compare-heads">' +
+        head(equipped, 'Equipped') +
         '<div class="tip-compare-vs">VS</div>' +
-        colHtml(item, 'Shop', elNew) +
+        head(item, 'Shop') +
       '</div>' +
-      (deltas ? '<div class="tip-compare-delta">' + deltas + '</div>' : '');
+      this.gearCompareTable(equipped, item);
     tip.style.borderColor = item.color || '#c9a227';
     tip.classList.add('tip-compare');
     tip.classList.remove('hidden');
@@ -547,41 +539,147 @@ class UI {
     this.placeTip(anchor);
   }
 
-  gearCompareDeltas(oldIt, newIt) {
-    if (!newIt) return '';
-    const keys = new Set();
-    if (oldIt && oldIt.mods) Object.keys(oldIt.mods).forEach((k) => keys.add(k));
-    if (newIt.mods) Object.keys(newIt.mods).forEach((k) => keys.add(k));
-    if (!keys.size && !(oldIt && oldIt.element) && !newIt.element) {
-      return oldIt ? '<span class="tip-delta-same">Buying replaces your current ' +
-        (SLOT_LABELS[newIt.slot] || 'item') + '.</span>' : '';
+  /** Ordered numeric gear stats used for side-by-side compare rows. */
+  gearCompareStatDefs() {
+    return [
+      { key: 'might', label: 'dmg', kind: 'pct' },
+      { key: 'flatDmg', label: 'flat dmg', kind: 'flat' },
+      { key: 'armor', label: 'armor', kind: 'pct' },
+      { key: 'maxHp', label: 'HP', kind: 'flat0' },
+      { key: 'crit', label: 'crit', kind: 'pct' },
+      { key: 'move', label: 'move', kind: 'pct' },
+      { key: 'regen', label: 'HP/s', kind: 'flat' },
+      { key: 'magnet', label: 'magnet', kind: 'pct' },
+      { key: 'area', label: 'area', kind: 'pct' },
+      { key: 'haste', label: 'atk speed', kind: 'pct' },
+      { key: 'lifesteal', label: 'lifesteal', kind: 'pct' },
+      { key: 'thorns', label: 'thorns', kind: 'flat' },
+      { key: 'xpGain', label: 'XP', kind: 'pct' },
+      { key: 'elementPower', label: 'elem dmg', kind: 'pct' },
+    ];
+  }
+
+  formatGearCompareValue(kind, v) {
+    if (v == null || !Number.isFinite(v) || Math.abs(v) < 1e-9) return '—';
+    if (kind === 'pct') return (v > 0 ? '+' : '') + Math.round(v * 100) + '%';
+    if (kind === 'flat0') return (v > 0 ? '+' : '') + Math.round(v);
+    return (v > 0 ? '+' : '') + (Math.round(v * 10) / 10);
+  }
+
+  formatGearCompareDelta(kind, d) {
+    if (!Number.isFinite(d) || Math.abs(d) < 1e-9) return { cls: 'tip-delta-same', txt: '—' };
+    if (kind === 'pct') {
+      return {
+        cls: d > 0 ? 'tip-delta-up' : 'tip-delta-down',
+        txt: (d > 0 ? '+' : '') + Math.round(d * 100) + '%',
+      };
     }
-    const labels = {
-      might: 'dmg', flatDmg: 'flat dmg', armor: 'armor', maxHp: 'HP', crit: 'crit',
-      move: 'move', regen: 'HP/s', magnet: 'magnet', area: 'area', haste: 'atk speed',
-      lifesteal: 'lifesteal', thorns: 'thorns', xpGain: 'XP', elementPower: 'elem dmg',
+    if (kind === 'flat0') {
+      return {
+        cls: d > 0 ? 'tip-delta-up' : 'tip-delta-down',
+        txt: (d > 0 ? '+' : '') + Math.round(d),
+      };
+    }
+    return {
+      cls: d > 0 ? 'tip-delta-up' : 'tip-delta-down',
+      txt: (d > 0 ? '+' : '') + (Math.round(d * 10) / 10),
     };
-    const bits = [];
-    for (const k of keys) {
-      const a = (oldIt && oldIt.mods && oldIt.mods[k]) || 0;
-      const b = (newIt.mods && newIt.mods[k]) || 0;
-      const d = b - a;
-      if (Math.abs(d) < 1e-6) continue;
-      const lab = labels[k] || k;
-      const pct = k === 'maxHp' || k === 'flatDmg' || k === 'regen' || k === 'thorns';
-      const txt = pct
-        ? ((d > 0 ? '+' : '') + (Math.round(d * 10) / 10) + ' ' + lab)
-        : ((d > 0 ? '+' : '') + Math.round(d * 100) + '% ' + lab);
-      bits.push('<span class="' + (d > 0 ? 'tip-delta-up' : 'tip-delta-down') + '">' + txt + '</span>');
+  }
+
+  numericMod(mods, key) {
+    if (!mods) return 0;
+    const v = mods[key];
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  }
+
+  gearCompareTable(oldIt, newIt) {
+    if (!newIt) return '';
+    const defs = this.gearCompareStatDefs();
+    const rows = [];
+
+    for (const def of defs) {
+      const a = this.numericMod(oldIt && oldIt.mods, def.key);
+      const b = this.numericMod(newIt.mods, def.key);
+      if (Math.abs(a) < 1e-9 && Math.abs(b) < 1e-9) continue;
+      const delta = this.formatGearCompareDelta(def.kind, b - a);
+      rows.push(
+        '<div class="tip-compare-row">' +
+          '<span class="tip-compare-stat">' + def.label + '</span>' +
+          '<span class="tip-compare-old">' + this.formatGearCompareValue(def.kind, a) + '</span>' +
+          '<span class="tip-compare-arrow">→</span>' +
+          '<span class="tip-compare-new">' + this.formatGearCompareValue(def.kind, b) + '</span>' +
+          '<span class="' + delta.cls + '">' + delta.txt + '</span>' +
+        '</div>'
+      );
     }
-    if (oldIt && oldIt.element !== newIt.element) {
-      const ne = newIt.element && ELEMENTS[newIt.element];
-      bits.push('<span class="tip-delta-same">Element → ' + (ne ? ne.name : 'none') + '</span>');
+
+    const oldEl = (oldIt && oldIt.element) || null;
+    const newEl = newIt.element || null;
+    if (oldEl || newEl) {
+      const oe = oldEl && ELEMENTS[oldEl];
+      const ne = newEl && ELEMENTS[newEl];
+      const same = oldEl === newEl;
+      const deltaCls = same ? 'tip-delta-same' : (newEl ? 'tip-delta-up' : 'tip-delta-down');
+      const deltaTxt = same ? '—' : (ne ? ne.name : 'none');
+      rows.push(
+        '<div class="tip-compare-row">' +
+          '<span class="tip-compare-stat">element</span>' +
+          '<span class="tip-compare-old"' + (oe ? ' style="color:' + oe.color + '"' : '') + '>' +
+            (oe ? oe.name : '—') + '</span>' +
+          '<span class="tip-compare-arrow">→</span>' +
+          '<span class="tip-compare-new"' + (ne ? ' style="color:' + ne.color + '"' : '') + '>' +
+            (ne ? ne.name : '—') + '</span>' +
+          '<span class="' + deltaCls + '">' + deltaTxt + '</span>' +
+        '</div>'
+      );
     }
-    if (!bits.length) {
-      return '<span class="tip-delta-same">Buying replaces the equipped item in this slot.</span>';
+
+    // Resist is an object on armor — show a compact row when either side has it.
+    const oldRes = oldIt && oldIt.mods && oldIt.mods.resist;
+    const newRes = newIt.mods && newIt.mods.resist;
+    const resistId = (newIt.element && newRes && newRes[newIt.element] != null)
+      ? newIt.element
+      : (oldIt && oldIt.element && oldRes && oldRes[oldIt.element] != null)
+        ? oldIt.element
+        : (newEl || oldEl);
+    if (resistId && ((oldRes && oldRes[resistId] != null) || (newRes && newRes[resistId] != null))) {
+      const a = (oldRes && typeof oldRes[resistId] === 'number') ? oldRes[resistId] : 0;
+      const b = (newRes && typeof newRes[resistId] === 'number') ? newRes[resistId] : 0;
+      if (Math.abs(a) >= 1e-9 || Math.abs(b) >= 1e-9) {
+        const elName = (ELEMENTS[resistId] && ELEMENTS[resistId].name) || resistId;
+        const delta = this.formatGearCompareDelta('pct', b - a);
+        rows.push(
+          '<div class="tip-compare-row">' +
+            '<span class="tip-compare-stat">resist ' + elName + '</span>' +
+            '<span class="tip-compare-old">' + this.formatGearCompareValue('pct', a) + '</span>' +
+            '<span class="tip-compare-arrow">→</span>' +
+            '<span class="tip-compare-new">' + this.formatGearCompareValue('pct', b) + '</span>' +
+            '<span class="' + delta.cls + '">' + delta.txt + '</span>' +
+          '</div>'
+        );
+      }
     }
-    return bits.join(' · ');
+
+    if (!rows.length) {
+      return '<div class="tip-compare-delta"><span class="tip-delta-same">' +
+        (oldIt
+          ? 'Buying replaces the equipped item in this slot.'
+          : 'No stat modifiers on this item.') +
+        '</span></div>';
+    }
+
+    return (
+      '<div class="tip-compare-table">' +
+        '<div class="tip-compare-row tip-compare-row-head">' +
+          '<span class="tip-compare-stat">Stat</span>' +
+          '<span class="tip-compare-old">Now</span>' +
+          '<span class="tip-compare-arrow"></span>' +
+          '<span class="tip-compare-new">Shop</span>' +
+          '<span>Δ</span>' +
+        '</div>' +
+        rows.join('') +
+      '</div>'
+    );
   }
 
   setSmithTab(on) {
@@ -1621,9 +1719,14 @@ class UI {
           '<div class="glossary-title"><span class="glossary-name">' + sp.name + '</span>' +
             (tags.length ? tags.map((t) => '<span class="glossary-tag">' + t + '</span>').join('') : '') +
           '</div>' +
-          '<div class="glossary-desc">' + (sp.ranged
-            ? 'Keeps distance and hurls ' + (sp.shotKind === 'log' ? 'wooden logs' : sp.shotKind === 'wool' ? 'wool' : 'projectiles') + '.'
-            : 'Melee beast of the forest.') +
+          '<div class="glossary-desc">' + (sp.blurb
+            ? sp.blurb
+            : sp.ranged
+              ? 'Keeps distance and hurls ' + (sp.shotKind === 'log' ? 'wooden logs'
+                : sp.shotKind === 'wool' ? 'wool'
+                : sp.shotKind === 'rock' ? ((sp.shotCount || 1) > 1 ? (sp.shotCount + ' rocks at once') : 'rocks')
+                : 'projectiles') + '.'
+              : 'Melee beast of the forest.') +
           '</div>' +
           '<div class="glossary-stats">' + stats.join('') + '</div>' +
         '</div>' +

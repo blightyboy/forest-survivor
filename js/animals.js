@@ -64,11 +64,21 @@ const SPECIES = {
     meat: [0, 1], goldChance: 0.08, gold: 1, xp: 1, height: 30, bodyOff: 7, eye: [9, -15.5],
     color: '#b5652b',
   },
+  rat: {
+    name: 'Rat', radius: 10, hp: 12, dmg: 5, wander: 58, chase: 198, aggro: 250,
+    windup: 0.2, lungeSpeed: 400, lungeTime: 0.13, cooldown: 0.68, kb: 370, stagger: true,
+    meat: [0, 1], goldChance: 0.12, gold: 1, xp: 2, height: 22, bodyOff: 6, eye: [12, -11.5],
+    color: '#6a5548',
+    blurb: 'Small, fast pack pests. Quick lunges and sharp bites.',
+  },
   raccoon: {
-    name: 'Raccoon', radius: 13, hp: 22, dmg: 7, wander: 50, chase: 168, aggro: 240,
-    windup: 0.3, lungeSpeed: 340, lungeTime: 0.16, cooldown: 0.9, kb: 320, stagger: true,
+    name: 'Raccoon', radius: 13, hp: 22, dmg: 6, wander: 50, chase: 150, aggro: 260,
+    windup: 0.32, lungeSpeed: 300, lungeTime: 0.14, cooldown: 1.05, kb: 280, stagger: true,
     meat: [0, 1], goldChance: 0.2, gold: 1, xp: 2, height: 28, bodyOff: 9, eye: [14.5, -16.8],
     color: '#7a7d82',
+    ranged: true, range: 320, preferRange: 210, shotSpeed: 290, shotRadius: 8,
+    shotKind: 'rock', shotColor: '#9a9088', shotSpin: 6, shotCount: 5, shotSpread: 0.22,
+    bossCombat: { dmg: 9, chase: 160, aggro: 360, windup: 0.28, cooldown: 0.85, range: 380, preferRange: 230, shotSpeed: 330 },
   },
   duck: {
     name: 'Duck', radius: 10, hp: 11, dmg: 3, wander: 55, chase: 175, aggro: 220,
@@ -77,13 +87,13 @@ const SPECIES = {
     color: '#4a7a3a',
   },
   sheep: {
-    name: 'Sheep', radius: 15, hp: 28, dmg: 5, wander: 36, chase: 95, aggro: 300,
-    windup: 0.42, lungeSpeed: 220, lungeTime: 0.14, cooldown: 1.15, kb: 260, stagger: true,
+    name: 'Sheep', radius: 15, hp: 28, dmg: 5, wander: 36, chase: 100, aggro: 300,
+    windup: 0.28, lungeSpeed: 220, lungeTime: 0.14, cooldown: 0.72, kb: 260, stagger: true,
     meat: [2, 3], goldChance: 0.25, gold: 1, xp: 5, height: 34, bodyOff: 12, eye: [16, -20],
     color: '#efe8dc',
-    ranged: true, range: 340, preferRange: 230, shotSpeed: 260, shotRadius: 12,
+    ranged: true, range: 340, preferRange: 230, shotSpeed: 280, shotRadius: 12,
     shotKind: 'wool', shotColor: '#f7f2ea', shotSpin: 4,
-    bossCombat: { dmg: 9, chase: 110, aggro: 380, windup: 0.36, cooldown: 0.95, range: 400, preferRange: 250, shotSpeed: 300 },
+    bossCombat: { dmg: 9, chase: 115, aggro: 380, windup: 0.24, cooldown: 0.58, range: 400, preferRange: 250, shotSpeed: 320 },
   },
   beaver: {
     name: 'Beaver', radius: 14, hp: 36, dmg: 7, wander: 40, chase: 110, aggro: 290,
@@ -98,7 +108,7 @@ const SPECIES = {
 
 /** Daytime kill-triggered boss candidates (species id → display). */
 const DAY_BOSS_SPECIES = [
-  'boar', 'wolf', 'bear', 'deer', 'fox', 'squirrel', 'raccoon', 'duck', 'sheep', 'beaver',
+  'boar', 'wolf', 'bear', 'deer', 'fox', 'squirrel', 'rat', 'raccoon', 'duck', 'sheep', 'beaver',
   'dire_boar', 'dire_wolf', 'dire_bear',
 ];
 
@@ -112,6 +122,7 @@ const BOSS_NAMES = {
   deer: 'Hart of the Grove',
   fox: 'Reynard the Cunning',
   squirrel: 'Nutlord Supreme',
+  rat: 'The Rat King',
   raccoon: 'Bandit King',
   duck: 'Drake of the Pond',
   sheep: 'Woolly Terror',
@@ -130,7 +141,7 @@ function isPassiveSpecies(species) {
 function isBearish(species) { return animalFamily(species) === 'bear'; }
 function isWolfish(species) { return animalFamily(species) === 'wolf'; }
 function isBoarish(species) { return animalFamily(species) === 'boar'; }
-function isTinyPest(species) { return species === 'squirrel' || species === 'duck'; }
+function isTinyPest(species) { return species === 'squirrel' || species === 'duck' || species === 'rat'; }
 
 const NO_MULT = { hp: 1, dmg: 1, speed: 1 };
 
@@ -661,30 +672,37 @@ class Animal {
     return [tvx, tvy];
   }
 
-  /** Throw a species projectile (wool, log, …) at a target with .x/.y. */
+  /** Throw a species projectile (wool, log, rocks, …) at a target with .x/.y. */
   fireRangedShot(game, target) {
     if (!target || !this.sp.ranged) return;
-    const a = Math.atan2(target.y - this.y, target.x - this.x);
-    this.facing = Math.cos(a) > 0 ? 1 : -1;
+    const base = Math.atan2(target.y - this.y, target.x - this.x);
+    this.facing = Math.cos(base) > 0 ? 1 : -1;
     const dmg = animalEffectiveDamage(this);
-    game.enemyShots.push(new EnemyBolt(
-      this.x + Math.cos(a) * (this.radius * 0.6),
-      this.y - this.bodyOff * 0.45 + Math.sin(a) * (this.radius * 0.2),
-      a,
-      {
-        speed: this.sp.shotSpeed || 280,
-        radius: this.sp.shotRadius || 11,
-        dmg,
-        element: null,
-        color: this.sp.shotColor || '#fff',
-        kind: this.sp.shotKind || 'bolt',
-        spin: this.sp.shotSpin || 0,
-        hitBuildings: true,
-        life: 2.4,
-      }
-    ));
-    game.fx.sparks(this.x, this.y - this.bodyOff, 4, this.sp.shotColor || '#fff');
-    Sound.play('throw', this.sp.shotKind === 'log' ? 0.7 : 1.1);
+    const count = Math.max(1, this.sp.shotCount | 0 || 1);
+    const spread = this.sp.shotSpread != null ? this.sp.shotSpread : 0.18;
+    const ox = this.x;
+    const oy = this.y - this.bodyOff * 0.45;
+    for (let i = 0; i < count; i++) {
+      const a = count === 1 ? base : base + (i - (count - 1) / 2) * spread;
+      game.enemyShots.push(new EnemyBolt(
+        ox + Math.cos(a) * (this.radius * 0.6),
+        oy + Math.sin(a) * (this.radius * 0.2),
+        a,
+        {
+          speed: this.sp.shotSpeed || 280,
+          radius: this.sp.shotRadius || 11,
+          dmg,
+          element: null,
+          color: this.sp.shotColor || '#fff',
+          kind: this.sp.shotKind || 'bolt',
+          spin: this.sp.shotSpin || 0,
+          hitBuildings: true,
+          life: 2.4,
+        }
+      ));
+    }
+    game.fx.sparks(this.x, this.y - this.bodyOff, 3 + count, this.sp.shotColor || '#fff');
+    Sound.play('throw', this.sp.shotKind === 'log' ? 0.7 : this.sp.shotKind === 'rock' ? 0.95 : 1.1);
   }
 
   /**
@@ -804,6 +822,8 @@ class Animal {
     const windup = this.state === 'windup' || (this.ability && this.ability.phase === 'tele');
     const angry = !this.dead && this.isHostile(game);
     const vDef = ANIMAL_VARIANTS[this.variant];
+    // Spikes sit on the back — draw before the body so the animal covers their base.
+    if (!flash && this.variant === 'demonic') drawDemonicSpikes(ctx, this);
     if (!flash && vDef && vDef.filter) ctx.filter = vDef.filter;
     switch (animalFamily(this.species)) {
       case 'wolf': drawWolf(ctx, this, flash, windup, angry); break;
@@ -811,6 +831,7 @@ class Animal {
       case 'deer': drawDeer(ctx, this, flash); break;
       case 'fox': drawFox(ctx, this, flash); break;
       case 'squirrel': drawSquirrel(ctx, this, flash, windup); break;
+      case 'rat': drawRat(ctx, this, flash, windup); break;
       case 'raccoon': drawRaccoon(ctx, this, flash, windup); break;
       case 'duck': drawDuck(ctx, this, flash, windup); break;
       case 'sheep': drawSheep(ctx, this, flash, windup); break;
@@ -818,7 +839,6 @@ class Animal {
       default: drawBoar(ctx, this, flash, windup, angry);
     }
     ctx.filter = 'none';
-    if (!flash && this.variant === 'demonic') drawDemonicSpikes(ctx, this);
     if (!flash && this.variant === 'necromantic') drawNecroEyes(ctx, this);
     if (this.boss) drawCrown(ctx, this.sp.eye[0] - 3, this.sp.eye[1] - 11);
     ctx.restore();
@@ -1010,6 +1030,74 @@ function drawSquirrel(ctx, a, flash, windup) {
   if (windup) {
     ctx.fillStyle = '#fff';
     ctx.fillRect(10.5, -12.6, 1.4, 2);
+  }
+}
+
+function drawRat(ctx, a, flash, windup) {
+  const body = flash ? '#fff' : windup ? '#8a6a58' : '#6a5548';
+  const belly = flash ? '#fff' : '#b8a090';
+  const dark = flash ? '#fff' : '#3e322c';
+  const pink = flash ? '#fff' : '#e8a090';
+  // long naked tail trailing behind
+  ctx.save();
+  ctx.translate(-6, -5);
+  ctx.rotate(0.35 + Math.sin(a.walkTime * 1.1) * 0.18);
+  ctx.beginPath();
+  ctx.moveTo(2, 0);
+  ctx.quadraticCurveTo(-8, 4, -16, 1);
+  ctx.quadraticCurveTo(-22, -1, -26, -4);
+  ctx.strokeStyle = pink;
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.restore();
+  legs(ctx, [-3.5, 4], -4, 2.6, dark, a, 4.5);
+  // low elongated body
+  ellipse(ctx, 1, -7, 9.5, 5.2);
+  ctx.fillStyle = body; ctx.fill();
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = belly;
+  ellipse(ctx, 2.5, -5.2, 5.5, 2.8); ctx.fill();
+  // head + pointed snout
+  ellipse(ctx, 10, -10, 5.2, 4.4);
+  ctx.fillStyle = body; ctx.fill();
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(13.5, -10);
+  ctx.lineTo(18.5, -8.5);
+  ctx.lineTo(13.8, -7);
+  ctx.closePath();
+  ctx.fillStyle = body; ctx.fill();
+  ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.fillStyle = pink;
+  ellipse(ctx, 17.8, -8.4, 1.4, 1.0); ctx.fill();
+  // round ears
+  ellipse(ctx, 8.2, -14.2, 2.4, 2.6);
+  ctx.fillStyle = body; ctx.fill();
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.fillStyle = pink;
+  ellipse(ctx, 8.4, -14, 1.2, 1.3); ctx.fill();
+  ellipse(ctx, 11.2, -13.8, 2.1, 2.3);
+  ctx.fillStyle = body; ctx.fill();
+  ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.fillStyle = pink;
+  ellipse(ctx, 11.4, -13.6, 1.0, 1.1); ctx.fill();
+  // eye + whiskers
+  ctx.fillStyle = '#111';
+  ellipse(ctx, 12, -11.5, 1.2, 1.35); ctx.fill();
+  if (!flash) {
+    ctx.strokeStyle = 'rgba(40,28,22,0.55)';
+    ctx.lineWidth = 0.7;
+    for (const dy of [-1.2, 0, 1.2]) {
+      ctx.beginPath();
+      ctx.moveTo(15.5, -8.8 + dy * 0.2);
+      ctx.lineTo(20.5, -8.2 + dy);
+      ctx.stroke();
+    }
+  }
+  if (windup) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(14.2, -7.2, 1.5, 2.1);
   }
 }
 

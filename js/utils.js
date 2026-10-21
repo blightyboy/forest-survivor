@@ -1,7 +1,7 @@
 'use strict';
 
 /** Shown as the bottom-right watermark; keep in sync with package.json version. */
-const BUILD_VERSION = '0.1.23-alpha-build';
+const BUILD_VERSION = '0.1.24-alpha-build';
 
 const TAU = Math.PI * 2;
 

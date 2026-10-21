@@ -265,6 +265,20 @@ class EnemyBolt {
       ellipse(ctx, L / 2 - 1, 0, W * 0.42, W * 0.42); ctx.fill();
       ctx.strokeStyle = 'rgba(40,20,8,0.35)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(-L * 0.2, -W * 0.15); ctx.lineTo(L * 0.25, -W * 0.1); ctx.stroke();
+    } else if (this.kind === 'rock') {
+      ctx.rotate(this.rot);
+      ctx.fillStyle = this.color || '#9a9088';
+      ctx.beginPath();
+      ctx.moveTo(-this.r * 0.9, this.r * 0.15);
+      ctx.lineTo(-this.r * 0.35, -this.r * 0.85);
+      ctx.lineTo(this.r * 0.55, -this.r * 0.65);
+      ctx.lineTo(this.r * 0.95, this.r * 0.25);
+      ctx.lineTo(0.1 * this.r, this.r * 0.9);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.3; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ellipse(ctx, -this.r * 0.2, -this.r * 0.25, this.r * 0.28, this.r * 0.2); ctx.fill();
     } else {
       const g = ctx.createRadialGradient(0, 0, 2, 0, 0, this.r + 4);
       g.addColorStop(0, '#dff6ff');
