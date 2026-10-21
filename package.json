@@ -1,0 +1,64 @@
+{
+  "name": "forest-survivor",
+  "productName": "Forest Survivor",
+  "version": "0.1.20-alpha-build",
+  "description": "Chop, hunt, and fortify your forest camp.",
+  "main": "electron/main.js",
+  "author": "Forest Survivor",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "build": "node electron/preserve-save.js backup && electron-builder --win && node electron/preserve-save.js restore",
+    "build:dir": "node electron/preserve-save.js backup && electron-builder --win --dir && node electron/preserve-save.js restore",
+    "build:portable": "node electron/preserve-save.js backup && electron-builder --win portable && node electron/preserve-save.js restore"
+  },
+  "build": {
+    "appId": "com.forestsurvivor.game",
+    "productName": "Forest Survivor",
+    "copyright": "Copyright © Forest Survivor",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "icon": "icon.png",
+    "files": [
+      "index.html",
+      "style.css",
+      "js/**/*",
+      "electron/**/*",
+      "icon.png",
+      "package.json"
+    ],
+    "extraFiles": [],
+    "win": {
+      "icon": "icon.png",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        },
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "ForestSurvivor-Portable.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Forest Survivor",
+      "artifactName": "ForestSurvivor-Setup-${version}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  }
+}
