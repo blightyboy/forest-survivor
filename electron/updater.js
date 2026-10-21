@@ -1,18 +1,22 @@
 'use strict';
 
 /**
- * GitHub release-based updates.
- * 1) Compare local app version to the latest GitHub release tag.
- * 2) If newer, prompt the renderer; on accept download via electron-updater
- *    (NSIS / installed builds) or open the release page (portable / fallback).
+ * In-app GitHub release updates.
+ * 1) Compare local version to the newest published GitHub release tag.
+ * 2) On accept: download the Setup / Portable exe inside the client (no browser).
+ * 3) On install: run the NSIS installer (or swap the portable exe) and relaunch.
+ *
+ * Prefer electron-updater when latest.yml exists; otherwise download the release
+ * asset URL directly. Builds are unsigned, so code-signature checks are off.
  */
 
-const { app, shell, net } = require('electron');
+const { app, net } = require('electron');
+const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 
 const GITHUB_OWNER = 'blightyboy';
 const GITHUB_REPO = 'forest-survivor';
-// List endpoint (not /latest) so prerelease / alpha tags still count.
 const RELEASES_API =
   'https://api.github.com/repos/' + GITHUB_OWNER + '/' + GITHUB_REPO + '/releases?per_page=10';
 const RELEASES_PAGE =
@@ -23,12 +27,14 @@ let win = null;
 let autoUpdater = null;
 let pendingInfo = null;
 let downloading = false;
+/** Path to a manually downloaded installer/portable exe (when not using electron-updater). */
+let manualPackagePath = null;
+let useManualInstall = false;
 
 function isPortable() {
   return !!process.env.PORTABLE_EXECUTABLE_DIR;
 }
 
-/** Strip leading v and normalize for compare. */
 function normalizeVersion(v) {
   return String(v || '')
     .trim()
@@ -36,10 +42,6 @@ function normalizeVersion(v) {
     .replace(/^V/, '');
 }
 
-/**
- * Semver-ish compare: major.minor.patch[-prerelease]
- * Returns negative if a < b, 0 if equal, positive if a > b.
- */
 function compareVersions(a, b) {
   const na = normalizeVersion(a);
   const nb = normalizeVersion(b);
@@ -57,7 +59,6 @@ function compareVersions(a, b) {
   for (let i = 0; i < 3; i++) {
     if (A.parts[i] !== B.parts[i]) return A.parts[i] - B.parts[i];
   }
-  // No prerelease > prerelease (1.0.0 > 1.0.0-alpha)
   if (!A.pre && B.pre) return 1;
   if (A.pre && !B.pre) return -1;
   if (A.pre === B.pre) return 0;
@@ -76,6 +77,7 @@ function httpGetJson(url) {
     const request = net.request({
       method: 'GET',
       url,
+      redirect: 'follow',
       headers: {
         'User-Agent': 'ForestSurvivor-Updater',
         Accept: 'application/vnd.github+json',
@@ -102,6 +104,68 @@ function httpGetJson(url) {
   });
 }
 
+/**
+ * Download a URL to disk with progress (follows redirects).
+ */
+function downloadToFile(url, destPath, onProgress) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    const tmp = destPath + '.part';
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+
+    const request = net.request({
+      method: 'GET',
+      url,
+      redirect: 'follow',
+      headers: { 'User-Agent': 'ForestSurvivor-Updater' },
+    });
+
+    request.on('response', (response) => {
+      const status = response.statusCode | 0;
+      if (status < 200 || status >= 300) {
+        reject(new Error('Download HTTP ' + status));
+        response.resume();
+        return;
+      }
+      const total = parseInt(response.headers['content-length'] || '0', 10) || 0;
+      let transferred = 0;
+      const file = fs.createWriteStream(tmp);
+      response.on('data', (chunk) => {
+        transferred += chunk.length;
+        if (typeof onProgress === 'function') {
+          onProgress({
+            percent: total ? (transferred / total) * 100 : 0,
+            transferred,
+            total,
+          });
+        }
+      });
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close(() => {
+          try {
+            if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+            fs.renameSync(tmp, destPath);
+            resolve(destPath);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+      file.on('error', (err) => {
+        try { fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+        reject(err);
+      });
+      response.on('error', (err) => {
+        try { fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+        reject(err);
+      });
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 function loadAutoUpdater() {
   if (autoUpdater) return autoUpdater;
   try {
@@ -109,6 +173,8 @@ function loadAutoUpdater() {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowPrerelease = true;
+    // Local / CI builds are unsigned — signature checks would always fail.
+    autoUpdater.verifyUpdateCodeSignature = false;
 
     autoUpdater.on('download-progress', (p) => {
       send('update:progress', {
@@ -120,14 +186,15 @@ function loadAutoUpdater() {
 
     autoUpdater.on('update-downloaded', (info) => {
       downloading = false;
+      useManualInstall = false;
       send('update:ready', {
         version: info && info.version ? info.version : (pendingInfo && pendingInfo.version),
       });
     });
 
     autoUpdater.on('error', (err) => {
-      downloading = false;
-      send('update:error', { message: String(err && err.message || err) });
+      // Don't surface mid-download if we are about to fall back to direct download.
+      console.warn('[updater] electron-updater error:', err && err.message);
     });
   } catch (err) {
     console.warn('[updater] electron-updater unavailable:', err && err.message);
@@ -141,28 +208,67 @@ async function fetchLatestRelease() {
   if (!Array.isArray(list) || !list.length) {
     throw new Error('No GitHub releases found');
   }
-  // Prefer newest published release (prereleases allowed; drafts skipped).
   const data = list.find((r) => r && !r.draft) || null;
   if (!data) throw new Error('No published GitHub releases found');
   const tag = normalizeVersion(data.tag_name || data.name || '');
   if (!tag) throw new Error('Latest release has no tag');
   const assets = Array.isArray(data.assets) ? data.assets : [];
-  const setup = assets.find((a) => /setup.*\.exe$/i.test(a.name) || /ForestSurvivor-Setup/i.test(a.name));
-  const portable = assets.find((a) => /portable.*\.exe$/i.test(a.name) || /ForestSurvivor-Portable/i.test(a.name));
+  const setup = assets.find((a) =>
+    /ForestSurvivor-Setup/i.test(a.name) || (/setup.*\.exe$/i.test(a.name) && !/portable/i.test(a.name))
+  );
+  const portable = assets.find((a) =>
+    /ForestSurvivor-Portable/i.test(a.name) || /portable.*\.exe$/i.test(a.name)
+  );
+  const blockmap = assets.find((a) => /\.blockmap$/i.test(a.name));
+  const latestYml = assets.find((a) => /^latest\.yml$/i.test(a.name));
   return {
     version: tag,
     name: data.name || tag,
     body: data.body || '',
     htmlUrl: data.html_url || RELEASES_PAGE,
     setupUrl: setup && setup.browser_download_url,
+    setupName: setup && setup.name,
     portableUrl: portable && portable.browser_download_url,
+    portableName: portable && portable.name,
+    hasUpdateFeed: !!latestYml,
     publishedAt: data.published_at || null,
   };
 }
 
+function packageDownloadUrl() {
+  if (!pendingInfo) return null;
+  if (isPortable()) {
+    return pendingInfo.portableUrl || pendingInfo.setupUrl || null;
+  }
+  return pendingInfo.setupUrl || pendingInfo.portableUrl || null;
+}
+
+function packageFileName() {
+  if (!pendingInfo) return 'ForestSurvivor-Update.exe';
+  if (isPortable()) {
+    return pendingInfo.portableName || ('ForestSurvivor-Portable-' + pendingInfo.version + '.exe');
+  }
+  return pendingInfo.setupName || ('ForestSurvivor-Setup-' + pendingInfo.version + '.exe');
+}
+
+async function downloadDirectAsset() {
+  const url = packageDownloadUrl();
+  if (!url) throw new Error('No installer asset on the latest GitHub release');
+
+  const dest = path.join(app.getPath('temp'), 'forest-survivor-update', packageFileName());
+  downloading = true;
+  useManualInstall = true;
+  send('update:status', { state: 'downloading', version: pendingInfo.version, mode: 'direct' });
+
+  await downloadToFile(url, dest, (p) => send('update:progress', p));
+  manualPackagePath = dest;
+  downloading = false;
+  send('update:ready', { version: pendingInfo.version, mode: 'direct' });
+  return { ok: true, path: dest };
+}
+
 /**
  * Check GitHub latest release tag vs local version.
- * Called after the window is ready.
  */
 async function checkForUpdates(browserWindow) {
   win = browserWindow;
@@ -203,20 +309,23 @@ async function checkForUpdates(browserWindow) {
     notes: release.body,
     htmlUrl: release.htmlUrl,
     setupUrl: release.setupUrl,
+    setupName: release.setupName,
     portableUrl: release.portableUrl,
+    portableName: release.portableName,
+    hasUpdateFeed: release.hasUpdateFeed,
     portable: isPortable(),
-    canAutoInstall: !isPortable(),
+    canAutoInstall: !!(release.setupUrl || release.portableUrl),
   };
 
   send('update:available', pendingInfo);
 
-  // Warm electron-updater feed in the background (needs latest.yml on the release).
+  // Warm electron-updater when a feed exists (installed NSIS builds).
   const updater = loadAutoUpdater();
-  if (updater && !isPortable()) {
+  if (updater && !isPortable() && release.hasUpdateFeed) {
     try {
       await updater.checkForUpdates();
     } catch (err) {
-      console.warn('[updater] feed check failed (tag compare still valid):', err && err.message);
+      console.warn('[updater] feed check failed (direct download still available):', err && err.message);
     }
   }
 
@@ -226,56 +335,98 @@ async function checkForUpdates(browserWindow) {
 async function startDownload() {
   if (!pendingInfo) return { ok: false, error: 'No update pending' };
   if (downloading) return { ok: true, downloading: true };
-
-  // Portable / missing installer assets: open the release page.
-  if (pendingInfo.portable || !pendingInfo.canAutoInstall) {
-    const url = pendingInfo.setupUrl || pendingInfo.portableUrl || pendingInfo.htmlUrl || RELEASES_PAGE;
-    await shell.openExternal(url);
-    send('update:status', { state: 'openedBrowser', version: pendingInfo.version, url });
-    return { ok: true, openedBrowser: true, url };
+  if (!pendingInfo.canAutoInstall) {
+    send('update:error', { message: 'Latest release has no downloadable Windows build attached.' });
+    return { ok: false, error: 'No assets' };
   }
 
+  // Portable always uses direct asset download (electron-updater can't replace portable).
+  if (isPortable()) {
+    try {
+      return await downloadDirectAsset();
+    } catch (err) {
+      downloading = false;
+      send('update:error', { message: String(err && err.message || err) });
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  }
+
+  // Installed build: try electron-updater first when latest.yml is present.
   const updater = loadAutoUpdater();
-  if (!updater) {
-    const url = pendingInfo.setupUrl || pendingInfo.htmlUrl || RELEASES_PAGE;
-    await shell.openExternal(url);
-    return { ok: true, openedBrowser: true, url };
+  if (updater && pendingInfo.hasUpdateFeed) {
+    downloading = true;
+    useManualInstall = false;
+    send('update:status', { state: 'downloading', version: pendingInfo.version, mode: 'updater' });
+    try {
+      const result = await updater.checkForUpdates();
+      if (!result || !result.updateInfo) throw new Error('No update info from feed');
+      await updater.downloadUpdate();
+      return { ok: true, downloading: true, mode: 'updater' };
+    } catch (err) {
+      console.warn('[updater] feed download failed, falling back to direct:', err && err.message);
+      downloading = false;
+    }
   }
 
-  downloading = true;
-  send('update:status', { state: 'downloading', version: pendingInfo.version });
+  // Direct GitHub asset download (works without latest.yml).
   try {
-    // Re-check so updater knows the target, then download.
-    await updater.checkForUpdates();
-    await updater.downloadUpdate();
-    return { ok: true, downloading: true };
+    return await downloadDirectAsset();
   } catch (err) {
     downloading = false;
-    // Fallback: open release if feed/assets missing.
-    const url = pendingInfo.setupUrl || pendingInfo.htmlUrl || RELEASES_PAGE;
-    send('update:error', {
-      message: String(err && err.message || err),
-      fallbackUrl: url,
-    });
-    try { await shell.openExternal(url); } catch (_) { /* ignore */ }
-    return { ok: false, error: String(err && err.message || err), openedBrowser: true, url };
+    send('update:error', { message: String(err && err.message || err) });
+    return { ok: false, error: String(err && err.message || err) };
   }
+}
+
+function installPortable(packagePath) {
+  const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
+  const currentExe = app.getPath('exe');
+  const targetName = path.basename(currentExe);
+  const targetPath = path.join(portableDir || path.dirname(currentExe), targetName);
+  const bat = path.join(app.getPath('temp'), 'forest-survivor-portable-update.bat');
+  const lines = [
+    '@echo off',
+    'setlocal',
+    'timeout /t 2 /nobreak >nul',
+    'copy /y "' + packagePath + '" "' + targetPath + '"',
+    'start "" "' + targetPath + '"',
+    'del "' + packagePath + '" >nul 2>&1',
+    'del "%~f0"',
+  ];
+  fs.writeFileSync(bat, lines.join('\r\n'), 'utf8');
+  spawn(bat, [], { detached: true, stdio: 'ignore', shell: true, windowsHide: true }).unref();
+  app.quit();
+  return { ok: true };
+}
+
+function installNsis(packagePath) {
+  // Launch the downloaded Setup.exe then quit so files unlock.
+  spawn(packagePath, ['--updated'], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+  }).unref();
+  setTimeout(() => app.quit(), 400);
+  return { ok: true };
 }
 
 function quitAndInstall() {
+  if (useManualInstall && manualPackagePath && fs.existsSync(manualPackagePath)) {
+    if (isPortable()) return installPortable(manualPackagePath);
+    return installNsis(manualPackagePath);
+  }
+
   const updater = loadAutoUpdater();
   if (updater) {
-    // isSilent=false, isForceRunAfter=true
     updater.quitAndInstall(false, true);
     return { ok: true };
   }
-  return { ok: false, error: 'Updater not available' };
-}
 
-function openReleasePage() {
-  const url = (pendingInfo && pendingInfo.htmlUrl) || RELEASES_PAGE;
-  shell.openExternal(url);
-  return { ok: true, url };
+  // Last resort: if we somehow have a package path, run it.
+  if (manualPackagePath && fs.existsSync(manualPackagePath)) {
+    return isPortable() ? installPortable(manualPackagePath) : installNsis(manualPackagePath);
+  }
+  return { ok: false, error: 'No downloaded update to install' };
 }
 
 function getPending() {
@@ -286,7 +437,6 @@ module.exports = {
   checkForUpdates,
   startDownload,
   quitAndInstall,
-  openReleasePage,
   getPending,
   compareVersions,
   normalizeVersion,

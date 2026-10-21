@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.1.22-alpha-build`
+Version: `0.1.23-alpha-build`
 
 A top-down survival action game: play as a lumberjack in a hostile forest. Chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids, assault waves, minibosses, and true bosses.
 
@@ -121,10 +121,10 @@ Windows builds embed `build/icon.ico` into the game `.exe` (generated from `icon
 
 ### Auto-update (GitHub releases)
 
-Packaged builds check the latest [GitHub release](https://github.com/blightyboy/forest-survivor/releases) tag on launch. If the installed `package.json` version is older than that tag, the game prompts to update.
+Packaged builds check the latest [GitHub release](https://github.com/blightyboy/forest-survivor/releases) tag on launch. If the installed version is older, the game prompts to **download and install inside the client** (no browser).
 
-- **Installed (NSIS)** — downloads and installs via `electron-updater` when the release includes builder update metadata (`latest.yml`). Otherwise opens the release download page.
-- **Portable** — opens the release page so you can grab the new portable exe (in-place replace is not supported).
+- **Installed (NSIS)** — downloads the Setup exe (via `electron-updater` when `latest.yml` is present, otherwise directly from the release asset), then runs the installer and relaunches.
+- **Portable** — downloads the new portable exe and swaps it in after quit.
 
 Publish a release with matching version tags (e.g. `v0.1.21-alpha-build`) and upload the built artifacts so update feeds (`latest.yml`) are generated.
 

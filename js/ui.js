@@ -187,6 +187,8 @@ class UI {
       menuCreditsHome: $('menuCreditsHome'), menuCreditsMeta: $('menuCreditsMeta'),
       menuMetaStats: $('menuMetaStats'), metaList: $('metaList'), metaStats: $('metaStats'),
       btnMetaRefund: $('btnMetaRefund'), metaRefundAmount: $('metaRefundAmount'),
+      menuVersionBtn: $('menuVersionBtn'), menuVersionLabel: $('menuVersionLabel'),
+      menuUpdateBadge: $('menuUpdateBadge'),
       goCredits: $('goCredits'),
     };
     this.cache = {};
@@ -209,6 +211,7 @@ class UI {
     document.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = ICONS[el.dataset.icon] || ''; });
     const wm = document.getElementById('buildWatermark');
     if (wm && typeof BUILD_VERSION === 'string') wm.textContent = BUILD_VERSION;
+    this.refreshMenuVersion();
     this.buildUpgrades();
     this.bind();
     this.bindTooltips();
@@ -250,6 +253,7 @@ class UI {
     onClick(document.getElementById('btnConfirmNo'), () => this.cancelConfirm());
     onClick(document.getElementById('btnUpdateYes'), () => this.acceptUpdate());
     onClick(document.getElementById('btnUpdateNo'), () => this.dismissUpdate());
+    onClick(this.el.menuVersionBtn, () => this.requestMenuUpdate());
     document.querySelectorAll('.glossary-tab').forEach((tab) => {
       onClick(tab, () => this.setGlossaryTab(tab.dataset.glossary));
     });
@@ -1159,39 +1163,99 @@ class UI {
     if (this.el.confirmOverlay) this.el.confirmOverlay.classList.add('hidden');
   }
 
-  bindUpdater() {
-    const api = typeof window !== 'undefined' ? window.jungleUpdate : null;
-    if (!api || !api.available) return;
-    api.onAvailable((info) => this.showUpdateAvailable(info));
-    api.onProgress((p) => this.showUpdateProgress(p));
-    api.onReady((info) => this.showUpdateReady(info));
-    api.onError((err) => this.showUpdateError(err));
-    api.onStatus((st) => {
-      if (st && st.state === 'openedBrowser') {
-        this.banner('Download started', 'Finish installing from the browser, then relaunch', '#9ef08a');
-        this.dismissUpdate();
+  currentBuildVersion() {
+    return (typeof BUILD_VERSION === 'string' && BUILD_VERSION) || '?';
+  }
+
+  refreshMenuVersion() {
+    const label = this.el.menuVersionLabel;
+    const btn = this.el.menuVersionBtn;
+    const badge = this.el.menuUpdateBadge;
+    if (!label || !btn) return;
+    const cur = (this.updateInfo && this.updateInfo.currentVersion) || this.currentBuildVersion();
+    const hasUpdate = !!(this.updateInfo && this.updateInfo.version);
+    const ready = this.updatePhase === 'ready' && hasUpdate;
+    const downloading = this.updatePhase === 'downloading' && hasUpdate;
+    label.textContent = 'v' + String(cur).replace(/^v/i, '');
+    if (hasUpdate) {
+      const next = String(this.updateInfo.version).replace(/^v/i, '');
+      btn.disabled = downloading;
+      btn.classList.add('has-update');
+      btn.title = ready
+        ? ('Version ' + next + ' downloaded — click to install')
+        : downloading
+          ? ('Downloading version ' + next + '…')
+          : ('Version ' + next + ' available — click to update');
+      if (badge) {
+        badge.classList.remove('hidden');
+        badge.textContent = ready ? 'Ready to install' : downloading ? 'Downloading…' : 'Update available';
       }
+    } else {
+      btn.disabled = true;
+      btn.classList.remove('has-update');
+      btn.title = 'Current version';
+      if (badge) badge.classList.add('hidden');
+    }
+  }
+
+  requestMenuUpdate() {
+    if (!this.updateInfo || !this.updateInfo.version) return;
+    if (this.updatePhase === 'downloading') return;
+    if (this.updatePhase === 'ready') {
+      this.showUpdateReady(this.updateInfo);
+      return;
+    }
+    const cur = this.updateInfo.currentVersion || this.currentBuildVersion();
+    const next = this.updateInfo.version;
+    this.askConfirm({
+      title: 'Update available',
+      message: 'Version ' + next + ' is out (you have ' + cur +
+        '). Download and install it now? The game will restart when the update finishes.',
+      confirmLabel: 'Update',
+      onConfirm: () => {
+        this.showUpdateAvailable(this.updateInfo, { startDownload: true });
+      },
     });
   }
 
-  showUpdateAvailable(info) {
+  bindUpdater() {
+    const api = typeof window !== 'undefined' ? window.jungleUpdate : null;
+    if (!api || !api.available) return;
+    api.onAvailable((info) => {
+      this.updateInfo = info || null;
+      this.updatePhase = 'ask';
+      this.refreshMenuVersion();
+      if (this.game && this.game.state === 'menu') {
+        this.banner('Update available', 'v' + String(info.version || '').replace(/^v/i, '') + ' — tap version below the menu', '#9ef08a');
+      }
+    });
+    api.onProgress((p) => this.showUpdateProgress(p));
+    api.onReady((info) => {
+      if (info && info.version && this.updateInfo) this.updateInfo.version = info.version;
+      this.showUpdateReady(info);
+      this.refreshMenuVersion();
+    });
+    api.onError((err) => this.showUpdateError(err));
+  }
+
+  showUpdateAvailable(info, opts) {
     if (!this.el.updateOverlay || !info) return;
     this.updateInfo = info;
     this.updatePhase = 'ask';
-    const cur = info.currentVersion || (typeof BUILD_VERSION === 'string' ? BUILD_VERSION : '?');
+    this.refreshMenuVersion();
+    const cur = info.currentVersion || this.currentBuildVersion();
     const next = info.version || '?';
     if (this.el.updateTitle) this.el.updateTitle.textContent = 'Update available';
     if (this.el.updateMessage) {
-      this.el.updateMessage.textContent = info.portable
-        ? ('Version ' + next + ' is out (you have ' + cur + '). Open the download page to get the new portable build.')
-        : ('Version ' + next + ' is out (you have ' + cur + '). Update now to install the latest release.');
+      this.el.updateMessage.textContent = 'Version ' + next + ' is out (you have ' + cur +
+        '). Download and install it from inside the game.';
     }
     if (this.el.updateProgressWrap) this.el.updateProgressWrap.classList.add('hidden');
     const yes = document.getElementById('btnUpdateYes');
     const no = document.getElementById('btnUpdateNo');
     if (yes) {
       yes.disabled = false;
-      yes.textContent = info.portable ? 'Open download' : 'Update now';
+      yes.textContent = 'Update now';
     }
     if (no) {
       no.disabled = false;
@@ -1202,11 +1266,13 @@ class UI {
       this.el.updateHint.textContent = 'Enter to update · Esc to dismiss';
     }
     this.el.updateOverlay.classList.remove('hidden');
+    if (opts && opts.startDownload) this.acceptUpdate();
   }
 
   showUpdateProgress(p) {
     if (!this.el.updateOverlay) return;
     this.updatePhase = 'downloading';
+    this.refreshMenuVersion();
     if (this.el.updateProgressWrap) this.el.updateProgressWrap.classList.remove('hidden');
     const pct = Math.max(0, Math.min(100, Number(p && p.percent) || 0));
     if (this.el.updateProgressFill) this.el.updateProgressFill.style.width = pct.toFixed(1) + '%';
@@ -1225,6 +1291,7 @@ class UI {
   showUpdateReady(info) {
     if (!this.el.updateOverlay) return;
     this.updatePhase = 'ready';
+    this.refreshMenuVersion();
     const ver = (info && info.version) || (this.updateInfo && this.updateInfo.version) || '';
     if (this.el.updateTitle) this.el.updateTitle.textContent = 'Ready to install';
     if (this.el.updateMessage) {
@@ -1250,19 +1317,22 @@ class UI {
   showUpdateError(err) {
     const msg = (err && err.message) || 'Update failed';
     this.banner('Update issue', msg.slice(0, 120), '#ff9a8a');
-    if (this.updatePhase === 'downloading') {
+    if (this.updatePhase === 'downloading' || this.updatePhase === 'ask') {
       this.updatePhase = 'ask';
+      this.refreshMenuVersion();
       const yes = document.getElementById('btnUpdateYes');
       const no = document.getElementById('btnUpdateNo');
-      if (yes) yes.disabled = false;
+      if (yes) {
+        yes.disabled = false;
+        yes.textContent = 'Retry download';
+      }
       if (no) no.disabled = false;
       if (this.el.updateProgressWrap) this.el.updateProgressWrap.classList.add('hidden');
       if (this.el.updateTitle) this.el.updateTitle.textContent = 'Update available';
       if (this.el.updateMessage) {
-        this.el.updateMessage.textContent = 'Automatic download failed. You can open the release page instead.';
+        this.el.updateMessage.textContent = 'Download failed. Check your connection and try again.';
       }
-      if (yes) yes.textContent = 'Open download';
-      if (this.el.updateHint) this.el.updateHint.textContent = 'Enter to open · Esc to dismiss';
+      if (this.el.updateHint) this.el.updateHint.textContent = 'Enter to retry · Esc to dismiss';
     }
   }
 
@@ -1278,13 +1348,13 @@ class UI {
     }
     if (this.updatePhase === 'downloading') return;
     this.updatePhase = 'downloading';
+    this.showUpdateProgress({ percent: 0 });
     const yes = document.getElementById('btnUpdateYes');
     if (yes) yes.disabled = true;
     if (this.el.updateTitle) this.el.updateTitle.textContent = 'Starting update…';
     api.download().then((res) => {
-      if (res && res.openedBrowser) {
-        this.banner('Download page opened', 'Install the new build, then relaunch', '#9ef08a');
-        this.dismissUpdate();
+      if (res && res.ok === false) {
+        this.showUpdateError({ message: res.error || 'Download failed' });
       }
     }).catch((err) => {
       this.showUpdateError({ message: String(err && err.message || err) });
@@ -1292,12 +1362,18 @@ class UI {
   }
 
   dismissUpdate() {
-    this.updatePhase = null;
+    // Keep pending update info so the main-menu indicator stays clickable.
+    if (this.updateInfo && this.updateInfo.version) {
+      this.updatePhase = (this.updatePhase === 'ready') ? 'ready' : 'ask';
+    } else {
+      this.updatePhase = null;
+    }
     if (this.el.updateOverlay) this.el.updateOverlay.classList.add('hidden');
     const yes = document.getElementById('btnUpdateYes');
     const no = document.getElementById('btnUpdateNo');
     if (yes) yes.disabled = false;
     if (no) no.disabled = false;
+    this.refreshMenuVersion();
   }
 
   disarmRestart() {

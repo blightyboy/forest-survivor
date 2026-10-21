@@ -247,7 +247,6 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('update:download', async () => updater.startDownload());
   ipcMain.handle('update:install', async () => updater.quitAndInstall());
-  ipcMain.handle('update:openRelease', async () => updater.openReleasePage());
   ipcMain.handle('update:pending', async () => updater.getPending());
 
   createWindow();

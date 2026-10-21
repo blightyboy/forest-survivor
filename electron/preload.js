@@ -44,9 +44,6 @@ contextBridge.exposeInMainWorld('jungleUpdate', {
   install() {
     return ipcRenderer.invoke('update:install');
   },
-  openRelease() {
-    return ipcRenderer.invoke('update:openRelease');
-  },
   pending() {
     return ipcRenderer.invoke('update:pending');
   },
