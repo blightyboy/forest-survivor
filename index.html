@@ -116,13 +116,20 @@
   </div>
 
   <div id="pauseOverlay" class="overlay hidden">
-    <div class="card">
-      <h1>Paused</h1>
-      <p>Take a breather. The boars will wait.</p>
-      <button id="btnResume" class="btn big" type="button">Resume</button>
-      <button id="btnPauseOptions" class="btn big ghost" type="button">Options</button>
-      <button id="btnPauseMenu" class="btn big ghost" type="button">Main Menu</button>
-      <p class="small">Press P or Esc to resume</p>
+    <div class="card pause-sheet">
+      <header class="pause-head">
+        <div>
+          <h1>Paused</h1>
+          <p class="pause-sub">Character sheet · the forest waits</p>
+        </div>
+        <p class="small pause-hint">P / Esc to resume</p>
+      </header>
+      <div id="pauseSheet" class="pause-sheet-body"></div>
+      <div class="pause-actions">
+        <button id="btnResume" class="btn big" type="button">Resume</button>
+        <button id="btnPauseOptions" class="btn big ghost" type="button">Options</button>
+        <button id="btnPauseMenu" class="btn big ghost" type="button">Main Menu</button>
+      </div>
     </div>
   </div>
 

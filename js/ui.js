@@ -104,7 +104,7 @@ const TUTORIAL_CONTENT = {
       '<p>When you meet a threat, look for these markings:</p>' +
       '<ul>' +
         '<li><b>Veterancy stars</b> — bronze (1–5), then silver (1–5), then gold (1–5). Higher tiers mean tougher fights and better loot.</li>' +
-        '<li><b>Variants</b> — <b>Dire</b> (darker brutes), <b>Necromantic</b> (undead green-gray), <b>Demonic</b> (red with spikes). Stronger than basic beasts.</li>' +
+        '<li><b>Variants</b> — <b>Dire</b> (darker brutes), <b>Necromantic</b> (split into 3 lesser copies on death), <b>Demonic</b> (leave a fire pool on death).</li>' +
         '<li><b>Elements</b> — colored beasts lean on fire, water, nature, earth, light, or darkness. Matching your weapon element helps; theirs can resist yours.</li>' +
         '<li><b>Melee</b> — most animals charge and lunge up close.</li>' +
         '<li><b>Ranged</b> — sheep hurl wool, raccoons fling rocks, and beavers throw logs while keeping their distance.</li>' +
@@ -156,7 +156,8 @@ class UI {
       phaseText: $('phaseText'), threatText: $('threatText'),
       panel: $('upgradePanel'), list: $('upgradeList'), campNote: $('campNote'),
       banner: $('banner'), bannerTitle: $('bannerTitle'), bannerSub: $('bannerSub'),
-      pauseOverlay: $('pauseOverlay'), gameOverOverlay: $('gameOverOverlay'), goStats: $('goStats'), goTitle: $('goTitle'),
+      pauseOverlay: $('pauseOverlay'), pauseSheet: $('pauseSheet'),
+      gameOverOverlay: $('gameOverOverlay'), goStats: $('goStats'), goTitle: $('goTitle'),
       optionsOverlay: $('optionsOverlay'), optResolution: $('optResolution'),
       optMusicVolume: $('optMusicVolume'), optMusicPct: $('optMusicPct'),
       optUiScale: $('optUiScale'), optUiScalePct: $('optUiScalePct'),
@@ -345,6 +346,40 @@ class UI {
     window.addEventListener('resize', () => this.hideTip());
   }
 
+  /** Human-readable rows for a weapon stats object. */
+  formatWeaponStatRows(s, weaponId) {
+    if (!s) return [];
+    const rows = [];
+    const push = (label, value) => { if (value != null && value !== '') rows.push([label, value]); };
+    push('Damage', s.dmg != null ? String(Math.round(s.dmg * 10) / 10) : null);
+    push('Count', s.count != null ? '×' + s.count : null);
+    push('Pierce', s.pierce != null ? String(s.pierce) : null);
+    push('Range', s.range != null ? String(Math.round(s.range)) : null);
+    push('Reach', s.len != null ? String(Math.round(s.len)) : null);
+    push('Orbit', s.orbit != null ? String(Math.round(s.orbit)) : null);
+    push('Radius', s.radius != null ? String(Math.round(s.radius)) : null);
+    push('Size', s.size != null ? String(Math.round(s.size)) : null);
+    push('Distance', s.dist != null ? String(Math.round(s.dist)) : null);
+    push('Cone', s.cone != null ? Math.round(s.cone * 100) + '%' : null);
+    if (s.speed != null) {
+      if (weaponId === 'axe') push('Spin', (Math.round(s.speed * 100) / 100) + ' r/s');
+      else push('Speed', String(Math.round(s.speed)));
+    }
+    push('Cooldown', s.cd != null ? s.cd.toFixed(2) + 's' : null);
+    push('Tick', s.tick != null ? s.tick.toFixed(2) + 's' : null);
+    push('Bite CD', s.biteCd != null ? s.biteCd.toFixed(2) + 's' : null);
+    push('Duration', s.duration != null ? s.duration + 's' : null);
+    push('Respawn', s.spawnCd != null ? s.spawnCd.toFixed(1) + 's' : null);
+    return rows;
+  }
+
+  tipStatsHtml(rows) {
+    if (!rows || !rows.length) return '';
+    return '<div class="tip-stats">' + rows.map((r) =>
+      '<div class="tip-stat"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'
+    ).join('') + '</div>';
+  }
+
   tipContent(kind, id) {
     const g = this.game, ar = g.arsenal;
     if (kind === 'weapon') {
@@ -355,18 +390,26 @@ class UI {
       const elDef = el && ELEMENTS[el];
       const inf = el && ELEMENT_INFUSE[el];
       const unique = ar.isUnique && ar.isUnique(id);
+      const stats = ar.stats ? ar.stats(id) : def.stats(lvl);
+      const rows = this.formatWeaponStatRows(stats, id);
+      const unlocks = [];
+      for (let i = 1; i < lvl && i < def.text.length; i++) {
+        unlocks.push('<li>Lv' + (i + 1) + ': ' + def.text[i] + '</li>');
+      }
       const extras = [];
       if (unique) extras.push('Unique form — stronger stats & elemental look');
       if (elDef) extras.push(elDef.name + (inf ? ': ' + inf.effect : ''));
+      if (lvl < WEAPON_MAX && def.text[lvl]) extras.push('Next: ' + def.text[lvl]);
       return {
         name: ar.displayName ? ar.displayName(id) : def.name,
         tag: unique
-          ? 'Unique · ' + (elDef ? elDef.name : 'Element')
+          ? 'Unique · Lv ' + lvl + ' · ' + (elDef ? elDef.name : 'Element')
           : ('Weapon · Lv ' + lvl + (lvl >= WEAPON_MAX ? ' (MAX)' : '')),
-        desc: unique
-          ? (def.text[WEAPON_MAX - 1] || def.text[def.text.length - 1] || '')
-          : (def.text[Math.max(0, lvl - 1)] || ''),
-        extra: extras.join('\n'),
+        desc: def.text[0] || '',
+        statsHtml: this.tipStatsHtml(rows),
+        extra: (unlocks.length
+          ? '<div class="tip-unlocks"><div class="tip-unlocks-lab">Upgrades</div><ul>' + unlocks.join('') + '</ul></div>'
+          : '') + (extras.length ? extras.map((e) => '<div>' + e + '</div>').join('') : ''),
         color: elDef ? elDef.color : '#c98a12',
       };
     }
@@ -374,11 +417,13 @@ class UI {
       const def = PASSIVE_DEFS[id];
       if (!def) return null;
       const lvl = ar.passives[id] || 0;
+      const rows = this.passiveTipStatRows(id, lvl);
       return {
         name: def.name,
         tag: 'Upgrade · Lv ' + lvl + ' / ' + def.max,
         desc: def.desc,
-        extra: '',
+        statsHtml: this.tipStatsHtml(rows),
+        extra: lvl < def.max ? 'Next stack: same bonus again' : 'Maxed',
         color: '#4a8ad4',
       };
     }
@@ -395,11 +440,13 @@ class UI {
         };
       }
       const elDef = it.element && ELEMENTS[it.element];
+      const rows = this.gearTipStatRows(it);
       return {
         name: it.qualityName + ' ' + it.name,
         tag: label + (elDef ? ' · ' + elDef.name : ''),
         desc: it.desc,
-        extra: '',
+        statsHtml: this.tipStatsHtml(rows),
+        extra: elDef ? (elDef.name + ' element') : '',
         // Border / title use rarity color; element is called out in the tag.
         color: it.color || '#c9a227',
       };
@@ -431,6 +478,71 @@ class UI {
     return null;
   }
 
+  gearTipStatRows(it) {
+    const m = (it && it.mods) || {};
+    const rows = [];
+    const pct = (v) => (v > 0 ? '+' : '') + Math.round(v * 100) + '%';
+    const flat = (v, d) => (v > 0 ? '+' : '') + (Math.round(v * Math.pow(10, d || 1)) / Math.pow(10, d || 1));
+    if (m.might) rows.push(['Damage', pct(m.might)]);
+    if (m.flatDmg) rows.push(['Flat dmg', flat(m.flatDmg)]);
+    if (m.armor) rows.push(['Armor', pct(m.armor)]);
+    if (m.maxHp) rows.push(['HP', flat(m.maxHp, 0)]);
+    if (m.crit) rows.push(['Crit', pct(m.crit)]);
+    if (m.move) rows.push(['Move', pct(m.move)]);
+    if (m.regen) rows.push(['Regen', flat(m.regen) + '/s']);
+    if (m.magnet) rows.push(['Magnet', pct(m.magnet)]);
+    if (m.area) rows.push(['Area', pct(m.area)]);
+    if (m.haste) rows.push(['Atk speed', pct(m.haste)]);
+    if (m.lifesteal) rows.push(['Lifesteal', pct(m.lifesteal)]);
+    if (m.thorns) rows.push(['Thorns', flat(m.thorns)]);
+    if (m.xpGain) rows.push(['XP', pct(m.xpGain)]);
+    if (m.elementPower) rows.push(['Elem dmg', pct(m.elementPower)]);
+    return rows;
+  }
+
+  passiveTipStatRows(id, lvl) {
+    if (!lvl) return [];
+    const rows = [];
+    switch (id) {
+      case 'might': rows.push(['Damage', '+' + Math.round(15 * lvl) + '%']); break;
+      case 'haste':
+        rows.push(['Fire rate', '+' + Math.round(7 * lvl) + '%']);
+        rows.push(['Axe spin', '+' + Math.round(8 * lvl) + '%']);
+        break;
+      case 'area': rows.push(['Area / reach', '+' + Math.round(10 * lvl) + '%']); break;
+      case 'speed': rows.push(['Move speed', '+' + Math.round(8 * lvl) + '%']); break;
+      case 'magnet': rows.push(['Pickup range', '+' + Math.round(35 * lvl) + '%']); break;
+      case 'vitality': rows.push(['Max HP', '+' + (25 * lvl)]); break;
+      case 'armor': rows.push(['Damage taken', '-' + Math.round(7 * lvl) + '%']); break;
+      case 'regen': rows.push(['Regen', '+' + (Math.round(0.5 * lvl * 10) / 10) + ' HP/s']); break;
+      case 'luck': rows.push(['Crit chance', '+' + Math.round(6 * lvl) + '%']); break;
+      case 'amount': rows.push(['Extra projectiles', '+' + lvl]); break;
+      case 'dash': rows.push(['Dash charges', '+' + lvl]); break;
+      case 'greed':
+        rows.push(['Max HP', '-' + Math.round(8 * lvl) + '%']);
+        rows.push(['Drops / XP', '+' + Math.round(18 * lvl) + '%']);
+        break;
+      case 'devil':
+        rows.push(['Max HP', '-' + Math.round(10 * lvl) + '%']);
+        rows.push(['Damage', '+' + Math.round(12 * lvl) + '%']);
+        break;
+      case 'angel':
+        rows.push(['Damage', '-' + Math.round(8 * lvl) + '%']);
+        rows.push(['Max HP', '+' + (30 * lvl)]);
+        break;
+      case 'ember':
+      case 'tide':
+      case 'bloom':
+      case 'quake':
+      case 'radiance':
+      case 'umbra':
+        rows.push(['Element dmg', '+' + Math.round(36 * lvl) + '%']);
+        break;
+      default: break;
+    }
+    return rows;
+  }
+
   showTip(anchor) {
     const tip = this.el.tipPop;
     if (!tip || !anchor) return;
@@ -442,7 +554,8 @@ class UI {
     tip.innerHTML =
       '<div class="tip-name">' + c.name + '</div>' +
       '<div class="tip-tag">' + c.tag + '</div>' +
-      '<p class="tip-desc">' + c.desc + '</p>' +
+      (c.desc ? '<p class="tip-desc">' + c.desc + '</p>' : '') +
+      (c.statsHtml || '') +
       (c.extra ? '<div class="tip-extra">' + c.extra + '</div>' : '');
     tip.style.borderColor = c.color || '#c9a227';
     tip.classList.remove('hidden');
@@ -1485,8 +1598,197 @@ class UI {
 
   showPause(on) {
     this.el.pauseOverlay.classList.toggle('hidden', !on);
-    if (!on) this.hideOptions(true);
+    if (on) this.renderPauseSheet();
+    else this.hideOptions(true);
     this.setPausedIcon(on);
+  }
+
+  pauseSection(title, body) {
+    if (!body) return '';
+    return '<section class="pause-sec"><h2>' + title + '</h2>' + body + '</section>';
+  }
+
+  pauseStatGrid(rows) {
+    if (!rows || !rows.length) return '<p class="pause-empty">None</p>';
+    return '<div class="pause-stat-grid">' + rows.map((r) =>
+      '<div class="pause-stat"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'
+    ).join('') + '</div>';
+  }
+
+  renderPauseSheet() {
+    const el = this.el.pauseSheet;
+    if (!el) return;
+    const g = this.game;
+    const p = g.player;
+    const ps = g.ps || {};
+    const ar = g.arsenal;
+    const pct = (v) => Math.round((v || 0) * 100) + '%';
+    const signedPct = (v) => ((v >= 0 ? '+' : '') + Math.round(v * 100) + '%');
+
+    const runRows = [
+      ['Time', formatTime(g.time || 0)],
+      ['Day', String(g.dayNumber())],
+      ['Phase', (g.phaseName ? g.phaseName.charAt(0).toUpperCase() + g.phaseName.slice(1) : '—')],
+      ['Threat', '×' + (g.threat ? g.threat().hp.toFixed(1) : '1.0')],
+      ['Level', String(g.level || 1)],
+      ['XP', Math.floor(g.xp || 0) + ' / ' + xpNeeded(g.level || 1)],
+      ['HP', Math.ceil(p.hp) + ' / ' + Math.ceil(p.maxHp)],
+      ['Wood', formatNum(g.res.wood || 0)],
+      ['Meat', formatNum(g.res.meat || 0)],
+      ['Gold', formatNum(g.res.gold || 0)],
+      ['Kills', String(g.counters.kills || 0)],
+      ['Trees', String(g.counters.trees || 0)],
+      ['Raids', String(g.counters.raids || 0)],
+      ['Bosses', String(g.counters.bosses || 0)],
+      ['Aim lock', g.faceNearest ? 'On' : 'Off'],
+      ['Dash charges', String(ps.dashCharges || 1)],
+    ];
+
+    const combatRows = [
+      ['Damage', pct(ps.might)],
+      ['Flat damage', String(Math.round((ps.flatDamage || 0) * 10) / 10)],
+      ['Crit chance', pct(ps.crit)],
+      ['Cooldown', '×' + (ps.cooldown != null ? ps.cooldown.toFixed(2) : '1.00')],
+      ['Axe spin', '×' + (ps.spin != null ? ps.spin.toFixed(2) : '1.00')],
+      ['Area / reach', '×' + (ps.area != null ? ps.area.toFixed(2) : '1.00')],
+      ['Move speed', String(Math.round(ps.moveSpeed || 0))],
+      ['Pickup range', String(Math.round(ps.magnet || 0))],
+      ['Armor', pct(ps.armor)],
+      ['Regen', (ps.regen != null ? ps.regen.toFixed(2) : '0') + ' HP/s'],
+      ['Lifesteal', pct(ps.lifesteal)],
+      ['Thorns', String(Math.round((ps.thorns || 0) * 10) / 10)],
+      ['XP gain', '×' + (ps.xpGain != null ? ps.xpGain.toFixed(2) : '1.00')],
+      ['Loot', '×' + (ps.lootMult != null ? ps.lootMult.toFixed(2) : '1.00')],
+      ['Extra projectiles', '+' + (ps.amount || 0)],
+    ];
+    if (ps.attackElement && ELEMENTS[ps.attackElement]) {
+      combatRows.push(['Attack element', ELEMENTS[ps.attackElement].name]);
+    }
+    if (ps.elementPower) {
+      for (const id of ELEMENT_IDS) {
+        const v = ps.elementPower[id] || 0;
+        if (v > 0.001) combatRows.push([ELEMENTS[id].name + ' power', signedPct(v)]);
+      }
+    }
+    if (ps.resist) {
+      for (const id of ELEMENT_IDS) {
+        const v = ps.resist[id];
+        if (v && v > 0.001) combatRows.push(['Resist ' + ELEMENTS[id].name, signedPct(v)]);
+      }
+    }
+
+    let weaponsHtml = '';
+    if (ar && ar.order && ar.order.length) {
+      weaponsHtml = '<div class="pause-cards">' + ar.order.map((id) => {
+        const def = WEAPON_DEFS[id];
+        if (!def) return '';
+        const lvl = ar.weapons[id] || 0;
+        const unique = ar.isUnique && ar.isUnique(id);
+        const el = ar.weaponElements[id];
+        const elDef = el && ELEMENTS[el];
+        const stats = ar.stats ? ar.stats(id) : def.stats(lvl);
+        const rows = this.formatWeaponStatRows(stats, id);
+        const name = ar.displayName ? ar.displayName(id) : def.name;
+        return (
+          '<article class="pause-card">' +
+            '<div class="pause-card-head">' +
+              '<div class="pause-card-icon">' + (ICONS[id] || '') + '</div>' +
+              '<div>' +
+                '<div class="pause-card-name"' + (elDef ? ' style="color:' + elDef.color + '"' : '') + '>' + name + '</div>' +
+                '<div class="pause-card-tag">' +
+                  (unique ? 'Unique · ' : '') + 'Lv ' + lvl + (lvl >= WEAPON_MAX ? ' (MAX)' : '') +
+                  (elDef ? ' · ' + elDef.name : '') +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+            '<p class="pause-card-desc">' + (def.text[0] || '') + '</p>' +
+            this.pauseStatGrid(rows) +
+          '</article>'
+        );
+      }).join('') + '</div>';
+    } else {
+      weaponsHtml = '<p class="pause-empty">No weapons yet — level up to pick cards.</p>';
+    }
+
+    let passivesHtml = '';
+    const passIds = ar ? Object.keys(ar.passives || {}) : [];
+    if (passIds.length) {
+      passivesHtml = '<div class="pause-cards pause-cards-compact">' + passIds.map((id) => {
+        const def = PASSIVE_DEFS[id];
+        if (!def) return '';
+        const lvl = ar.passives[id] || 0;
+        return (
+          '<article class="pause-card">' +
+            '<div class="pause-card-head">' +
+              '<div class="pause-card-icon">' + (ICONS[id] || '') + '</div>' +
+              '<div>' +
+                '<div class="pause-card-name">' + def.name + '</div>' +
+                '<div class="pause-card-tag">Lv ' + lvl + ' / ' + def.max + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<p class="pause-card-desc">' + def.desc + '</p>' +
+            this.pauseStatGrid(this.passiveTipStatRows(id, lvl)) +
+          '</article>'
+        );
+      }).join('') + '</div>';
+    } else {
+      passivesHtml = '<p class="pause-empty">No passive upgrades yet.</p>';
+    }
+
+    let gearHtml = '';
+    const equipped = [];
+    if (g.shop && g.shop.equipped) {
+      for (const slot of ITEM_SLOTS) {
+        const it = g.shop.equipped[slot];
+        if (!it) continue;
+        equipped.push({ slot, it });
+      }
+    }
+    if (equipped.length) {
+      gearHtml = '<div class="pause-cards pause-cards-compact">' + equipped.map(({ slot, it }) => {
+        const elDef = it.element && ELEMENTS[it.element];
+        return (
+          '<article class="pause-card">' +
+            '<div class="pause-card-head">' +
+              '<div>' +
+                '<div class="pause-card-name" style="color:' + (it.color || '#ffe08a') + '">' +
+                  it.qualityName + ' ' + it.name +
+                '</div>' +
+                '<div class="pause-card-tag">' + (SLOT_LABELS[slot] || slot) +
+                  (elDef ? ' · ' + elDef.name : '') + '</div>' +
+              '</div>' +
+            '</div>' +
+            this.pauseStatGrid(this.gearTipStatRows(it)) +
+          '</article>'
+        );
+      }).join('') + '</div>';
+    } else {
+      gearHtml = '<p class="pause-empty">No gear equipped — visit the blacksmith at camp.</p>';
+    }
+
+    let buffsHtml = '';
+    const buffIds = [];
+    if (g.buffs) {
+      for (const id in g.buffs) {
+        if (g.buffs[id] > 0 && POWERUPS[id]) buffIds.push(id);
+      }
+    }
+    if (buffIds.length) {
+      buffsHtml = this.pauseStatGrid(buffIds.map((id) => [
+        POWERUPS[id].name,
+        Math.ceil(g.buffs[id]) + 's · ' + POWERUPS[id].desc,
+      ]));
+    } else {
+      buffsHtml = '<p class="pause-empty">No active power-ups.</p>';
+    }
+
+    el.innerHTML =
+      this.pauseSection('Run', this.pauseStatGrid(runRows)) +
+      this.pauseSection('Combat stats', this.pauseStatGrid(combatRows)) +
+      this.pauseSection('Weapons', weaponsHtml) +
+      this.pauseSection('Upgrades', passivesHtml) +
+      this.pauseSection('Gear', gearHtml) +
+      this.pauseSection('Buffs', buffsHtml);
   }
 
   showGameOver(stats) {
@@ -1657,7 +1959,8 @@ class UI {
       const variantBlurb = (typeof ANIMAL_VARIANTS !== 'undefined')
         ? '<div class="glossary-section">Variants</div>' +
           '<p class="glossary-blurb">Any beast can spawn as <b>Basic</b>, <b>Dire</b> (darker, tougher), ' +
-          '<b>Necromantic</b> (undead green-gray), or <b>Demonic</b> (crimson with spikes). ' +
+          '<b>Necromantic</b> (undead — splits into 3 lesser copies on death), or <b>Demonic</b> ' +
+          '(crimson with spikes — leaves a large fire pool on death). ' +
           'Variants stack with veterancy (bronze → silver → gold stars) and elements.</p>'
         : '';
       html = variantBlurb + ids.map((id) => this.glossaryBeastCard(id)).join('');

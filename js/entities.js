@@ -1280,22 +1280,26 @@ class ParticleSystem {
       ctx.globalAlpha = a;
       const y = p.y - p.z;
       switch (p.shape) {
-        case 'chip':
-          ctx.save();
-          ctx.translate(p.x, y);
-          ctx.rotate(p.rot);
+        case 'chip': {
+          // Avoid save/restore — cheaper for busy particle frames.
+          const dx = p.x, dy = y, rot = p.rot, sz = p.size;
+          const c = Math.cos(rot), s = Math.sin(rot);
           ctx.fillStyle = p.color;
-          ctx.fillRect(-p.size, -p.size * 0.45, p.size * 2, p.size * 0.9);
-          ctx.restore();
-          break;
-        case 'leaf':
-          ctx.save();
-          ctx.translate(p.x + Math.sin(p.rot * 2) * 3, y);
-          ctx.rotate(p.rot);
-          ctx.fillStyle = p.color;
-          ellipse(ctx, 0, 0, p.size, p.size * 0.5);
+          ctx.beginPath();
+          const hw = sz, hh = sz * 0.45;
+          const x0r = -hw, y0r = -hh, x1r = hw, y1r = hh;
+          ctx.moveTo(dx + x0r * c - y0r * s, dy + x0r * s + y0r * c);
+          ctx.lineTo(dx + x1r * c - y0r * s, dy + x1r * s + y0r * c);
+          ctx.lineTo(dx + x1r * c - y1r * s, dy + x1r * s + y1r * c);
+          ctx.lineTo(dx + x0r * c - y1r * s, dy + x0r * s + y1r * c);
+          ctx.closePath();
           ctx.fill();
-          ctx.restore();
+          break;
+        }
+        case 'leaf':
+          ctx.fillStyle = p.color;
+          ellipse(ctx, p.x + Math.sin(p.rot * 2) * 3, y, p.size, p.size * 0.5);
+          ctx.fill();
           break;
         case 'spark':
           ctx.strokeStyle = p.color;

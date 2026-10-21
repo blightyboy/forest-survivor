@@ -148,10 +148,12 @@ const NO_MULT = { hp: 1, dmg: 1, speed: 1 };
 /**
  * Affliction / elite overlays on any species (orthogonal to dire_* forms,
  * veterancy stars, and elements).
+ * Variant look uses cheap rim strokes + extras (spikes / eyes) — never ctx.filter
+ * (filters force a slow software canvas path).
  *  - basic: default look & stats
  *  - dire: darker brute (generic; not the same as dire_boar species)
- *  - necromantic: undead green-gray
- *  - demonic: crimson with back spikes
+ *  - necromantic: undead; splits into 3 lesser copies on death
+ *  - demonic: crimson with spikes; leaves a large fire pool on death
  */
 const ANIMAL_VARIANTS = {
   basic: {
@@ -161,20 +163,20 @@ const ANIMAL_VARIANTS = {
   dire: {
     id: 'dire', name: 'Dire',
     hp: 1.4, dmg: 1.22, speed: 0.96, xp: 1.35, loot: 1.3,
-    filter: 'brightness(0.66) saturate(0.7) contrast(1.18)',
     bar: '#8a6040',
+    rim: 'rgba(42, 24, 10, 0.7)',
   },
   necromantic: {
     id: 'necromantic', name: 'Necromantic',
     hp: 1.35, dmg: 1.12, speed: 0.92, xp: 1.45, loot: 1.28,
-    filter: 'saturate(0.2) hue-rotate(100deg) brightness(0.92) contrast(1.08)',
     bar: '#6dd4a0',
+    rim: 'rgba(90, 230, 150, 0.55)',
   },
   demonic: {
     id: 'demonic', name: 'Demonic',
     hp: 1.55, dmg: 1.38, speed: 1.04, xp: 1.6, loot: 1.45,
-    filter: 'sepia(0.45) hue-rotate(-18deg) saturate(2.4) brightness(0.72) contrast(1.22)',
     bar: '#ff4a3a',
+    rim: 'rgba(255, 55, 30, 0.5)',
   },
 };
 
@@ -239,19 +241,25 @@ class Animal {
     this.homeX = x; this.homeY = y;
     this.swarm = !!opts.swarm;
     this.big = !!opts.big && isBoarish(species) && !this.boss;
+    /** Split-spawned lesser copies never split again (blocks necro chains). */
+    this.fromSplit = !!opts.fromSplit;
     this.variant = VARIANT_IDS.includes(opts.variant) ? opts.variant : 'basic';
+    if (this.fromSplit) this.variant = 'basic';
     // Generic "Dire" overlay on an already-dire species — promote to necro/demonic instead.
-    if (this.variant === 'dire' && String(species).startsWith('dire_')) {
+    if (!this.fromSplit && this.variant === 'dire' && String(species).startsWith('dire_')) {
       const r = Math.random();
       this.variant = r < 0.4 ? 'demonic' : r < 0.75 ? 'necromantic' : 'basic';
     }
     this.name = this.boss
       ? (BOSS_NAMES[species] || sp.name)
-      : variantDisplayName(sp.name, this.variant);
+      : this.fromSplit
+        ? ('Lesser ' + sp.name)
+        : variantDisplayName(sp.name, this.variant);
     this.scale = this.trueBoss ? (isBearish(species) ? 2.15 : 2.55)
       : this.boss ? (isBearish(species) ? 1.7 : isTinyPest(species) ? 2.6 : 2.1)
       : this.big ? 1.4 : 1;
-    if (this.variant === 'demonic') this.scale *= 1.06;
+    if (this.fromSplit) this.scale *= 0.7;
+    else if (this.variant === 'demonic') this.scale *= 1.06;
     else if (this.variant === 'dire') this.scale *= 1.04;
     this.radius = sp.radius * this.scale;
     this.height = sp.height * this.scale;
@@ -319,7 +327,8 @@ class Animal {
   damage(amount, game, hx, hy, kbScale = 1) {
     if (this.dead) return false;
     this.hp -= amount;
-    this.flash = 0.12;
+    // Soft stack — constant DPS shouldn't pin the sprite at full white.
+    this.flash = Math.min(0.1, this.flash + 0.04);
     this.angry = 14;
     let dx = this.x - hx, dy = this.y - this.bodyOff - hy;
     let d = Math.hypot(dx, dy);
@@ -392,7 +401,7 @@ class Animal {
   }
 
   update(dt, game) {
-    if (this.flash > 0) this.flash -= dt;
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2.4);
     const kd = Math.exp(-7 * dt);
     if (this.dead) {
       this.deathT += dt;
@@ -818,29 +827,29 @@ class Animal {
     ctx.scale(this.facing * s, s);
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    const flash = this.flash > 0;
+    // Hit feedback is a soft overlay — never replace the whole skin with white.
     const windup = this.state === 'windup' || (this.ability && this.ability.phase === 'tele');
     const angry = !this.dead && this.isHostile(game);
     const vDef = ANIMAL_VARIANTS[this.variant];
     // Spikes sit on the back — draw before the body so the animal covers their base.
-    if (!flash && this.variant === 'demonic') drawDemonicSpikes(ctx, this);
-    if (!flash && vDef && vDef.filter) ctx.filter = vDef.filter;
+    if (this.variant === 'demonic') drawDemonicSpikes(ctx, this);
     switch (animalFamily(this.species)) {
-      case 'wolf': drawWolf(ctx, this, flash, windup, angry); break;
-      case 'bear': drawBear(ctx, this, flash, windup, angry); break;
-      case 'deer': drawDeer(ctx, this, flash); break;
-      case 'fox': drawFox(ctx, this, flash); break;
-      case 'squirrel': drawSquirrel(ctx, this, flash, windup); break;
-      case 'rat': drawRat(ctx, this, flash, windup); break;
-      case 'raccoon': drawRaccoon(ctx, this, flash, windup); break;
-      case 'duck': drawDuck(ctx, this, flash, windup); break;
-      case 'sheep': drawSheep(ctx, this, flash, windup); break;
-      case 'beaver': drawBeaver(ctx, this, flash, windup); break;
-      default: drawBoar(ctx, this, flash, windup, angry);
+      case 'wolf': drawWolf(ctx, this, false, windup, angry); break;
+      case 'bear': drawBear(ctx, this, false, windup, angry); break;
+      case 'deer': drawDeer(ctx, this, false); break;
+      case 'fox': drawFox(ctx, this, false); break;
+      case 'squirrel': drawSquirrel(ctx, this, false, windup); break;
+      case 'rat': drawRat(ctx, this, false, windup); break;
+      case 'raccoon': drawRaccoon(ctx, this, false, windup); break;
+      case 'duck': drawDuck(ctx, this, false, windup); break;
+      case 'sheep': drawSheep(ctx, this, false, windup); break;
+      case 'beaver': drawBeaver(ctx, this, false, windup); break;
+      default: drawBoar(ctx, this, false, windup, angry);
     }
-    ctx.filter = 'none';
-    if (!flash && this.variant === 'necromantic') drawNecroEyes(ctx, this);
+    if (vDef && vDef.rim) drawVariantRim(ctx, this, vDef);
+    if (this.variant === 'necromantic') drawNecroEyes(ctx, this);
     if (this.boss) drawCrown(ctx, this.sp.eye[0] - 3, this.sp.eye[1] - 11);
+    if (this.flash > 0) drawHitFlash(ctx, this);
     ctx.restore();
 
     if (this.dead) return;
@@ -903,6 +912,37 @@ function drawCrown(ctx, x, y) {
   ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.1; ctx.stroke();
   ctx.fillStyle = '#e5484d';
   ellipse(ctx, x, y + 0.5, 1.3, 1.3); ctx.fill();
+}
+
+/** Soft hit highlight in local animal space — keeps the skin readable under DPS. */
+function drawHitFlash(ctx, a) {
+  const t = clamp(a.flash / 0.1, 0, 1);
+  if (t <= 0) return;
+  const bodyOff = a.sp.bodyOff || a.bodyOff || 10;
+  const h = a.height || 32;
+  const r = Math.max(10, a.radius || 14);
+  ctx.save();
+  ctx.globalAlpha = 0.12 + t * 0.22;
+  ctx.fillStyle = '#fff6e8';
+  ellipse(ctx, 2, -bodyOff - h * 0.18, r * 1.15, h * 0.42);
+  ctx.fill();
+  ctx.globalAlpha = 0.08 + t * 0.14;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ellipse(ctx, 2, -bodyOff - h * 0.18, r * 1.2, h * 0.46);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Outline hint for variants (local animal space). */
+function drawVariantRim(ctx, a, vDef) {
+  const bodyOff = a.sp.bodyOff || a.bodyOff || 10;
+  const h = a.height || 32;
+  const r = Math.max(10, a.radius || 14);
+  ctx.strokeStyle = vDef.rim;
+  ctx.lineWidth = 2;
+  ellipse(ctx, 2, -bodyOff - h * 0.2, r * 1.12, h * 0.4);
+  ctx.stroke();
 }
 
 /** Crimson back / shoulder spikes for demonic variants (local animal space). */

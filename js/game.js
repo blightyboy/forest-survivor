@@ -41,6 +41,8 @@ const PHASE_DAWN = 0.95;
 const CLOCK_OFFSET = DAY_LENGTH * 0.05;   // the game starts in the morning
 const NIGHT_DARKNESS = 0.8;
 const LIGHT_SCALE = 0.5;                  // resolution of the darkness layer
+const LIGHT_COOKIE_SIZE = 128;            // prebaked soft circle for night lights
+const MAX_DPR = 1.5;                      // cap backing-store resolution for FPS
 const RAID_DISTANCE = 1050;
 
 const UPGRADES = [
@@ -217,12 +219,16 @@ class Input {
 class Game {
   constructor() {
     this.canvas = document.getElementById('game');
-    this.ctx = this.canvas.getContext('2d');
+    this.ctx = this.canvas.getContext('2d', { alpha: false, desynchronized: true })
+      || this.canvas.getContext('2d');
     this.lightCanvas = document.createElement('canvas');
-    this.lightCtx = this.lightCanvas.getContext('2d');
+    this.lightCtx = this.lightCanvas.getContext('2d', { alpha: true })
+      || this.lightCanvas.getContext('2d');
+    this.lightCookie = null;
+    this.warmCookie = null;
     this.input = new Input(this.canvas);
     this.input.onAction = (code) => this.handleAction(code);
-    this.particles = new ParticleSystem(900);
+    this.particles = new ParticleSystem(650);
     this.fx = new Effects(this.particles);
     this.texts = [];
     this.animalGrid = new SpatialGrid(128, WORLD_SIZE, WORLD_SIZE);
@@ -596,9 +602,36 @@ class Game {
     }
   }
 
+  ensureLightCookies() {
+    if (this.lightCookie && this.warmCookie) return;
+    const mk = (stops) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = LIGHT_COOKIE_SIZE;
+      const x = c.getContext('2d');
+      const g = x.createRadialGradient(
+        LIGHT_COOKIE_SIZE / 2, LIGHT_COOKIE_SIZE / 2, 0,
+        LIGHT_COOKIE_SIZE / 2, LIGHT_COOKIE_SIZE / 2, LIGHT_COOKIE_SIZE / 2
+      );
+      for (const [t, col] of stops) g.addColorStop(t, col);
+      x.fillStyle = g;
+      x.fillRect(0, 0, LIGHT_COOKIE_SIZE, LIGHT_COOKIE_SIZE);
+      return c;
+    };
+    // Destination-out punches holes using alpha from this cookie.
+    this.lightCookie = mk([
+      [0, 'rgba(0,0,0,1)'],
+      [0.55, 'rgba(0,0,0,0.65)'],
+      [1, 'rgba(0,0,0,0)'],
+    ]);
+    this.warmCookie = mk([
+      [0, 'rgba(255,140,50,1)'],
+      [1, 'rgba(255,140,50,0)'],
+    ]);
+  }
+
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
     this.canvas.style.width = w + 'px';
@@ -609,6 +642,7 @@ class Game {
     this.viewH = h;
     this.zoom = clamp(Math.min(w / 1100, h / 720), 0.62, 1.25);
     this.groundScale = clamp(Math.round(this.dpr * this.zoom * 2) / 2, 1, 1.5);
+    this.ensureLightCookies();
     const g = this.ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
     g.addColorStop(0, 'rgba(0,0,0,0)');
     g.addColorStop(1, 'rgba(10,25,5,0.45)');
@@ -1042,20 +1076,25 @@ class Game {
 
   separateAnimals() {
     const q = this._q;
-    for (const b of this.animals) {
+    const animals = this.animals;
+    for (let i = 0; i < animals.length; i++) {
+      const b = animals[i];
+      // Skip frozen far-off ambient animals — they don't need pairwise push.
       if (b.dead || b._sim === false) continue;
       q.length = 0;
       this.animalGrid.query(b.x, b.y, 64, q);
-      for (const o of q) {
-        if (o === b || o.dead) continue;
+      for (let j = 0; j < q.length; j++) {
+        const o = q[j];
+        if (o === b || o.dead || o._sim === false) continue;
         const minD = (b.radius + o.radius) * 0.85;
         const dx = b.x - o.x, dy = b.y - o.y;
         const d2 = dx * dx + dy * dy;
         if (d2 >= minD * minD || d2 < 0.0001) continue;
         const d = Math.sqrt(d2);
         const push = (minD - d) * 0.5;
-        b.x += (dx / d) * push; b.y += (dy / d) * push;
-        o.x -= (dx / d) * push; o.y -= (dy / d) * push;
+        const nx = dx / d, ny = dy / d;
+        b.x += nx * push; b.y += ny * push;
+        o.x -= nx * push; o.y -= ny * push;
       }
     }
   }
@@ -1854,6 +1893,8 @@ class Game {
       + sp.meat[0] + Math.floor(Math.random() * (sp.meat[1] - sp.meat[0] + 1));
     meat = Math.round(meat * lootM * threatLoot);
     if (stars >= 3) meat += Math.min(10, stars - 2);
+    // Split fragments drop much less so necro packs don't flood loot.
+    if (a.fromSplit) meat = Math.max(0, Math.floor(meat * 0.35));
     if (meat > 0) this.spawnDrops('meat', meat, a.x, a.y);
 
     const goldChance = Math.min(1, (a.boss ? 1 : sp.goldChance)
@@ -1865,20 +1906,100 @@ class Game {
     if (gold > 0) {
       gold = Math.round(gold * lootM * threatLoot);
       gold += Math.floor(stars * 0.55) + Math.floor(tm * 0.35);
-      this.spawnDrops('gold', Math.max(1, gold), a.x, a.y);
+      if (a.fromSplit) gold = Math.max(0, Math.floor(gold * 0.35));
+      if (gold > 0) this.spawnDrops('gold', Math.max(1, gold), a.x, a.y);
     }
 
-    const xp = Math.round(sp.xp * (a.big ? 2.3 : 1) * (a.boss ? 8 : 1) * (a.swarm ? 0.7 : 1)
+    let xp = Math.round(sp.xp * (a.big ? 2.3 : 1) * (a.boss ? 8 : 1) * (a.swarm ? 0.7 : 1)
       * (a.xpMult || 1) * threatXp * (a.element ? 1.15 : 1)
       * (a.trueBoss ? 1.35 : 1) * (this.ps.lootMult || 1));
+    if (a.fromSplit) xp = Math.max(1, Math.round(xp * 0.4));
     this.spawnXp(Math.max(1, xp), a.x, a.y);
-    this.rollPowerupDrop(a);
+    if (!a.fromSplit) this.rollPowerupDrop(a);
     if (!this.nuking) {
       this.fx.deathBurst(a.x, a.y - a.bodyOff, sp.color, a.boss ? 22 : isBearish(a.species) ? 18 : 12);
       this.addShake(a.boss ? 0.7 : a.big || isBearish(a.species) ? 0.4 : 0.26);
       Sound.play(a.boss ? 'roar' : 'boarDie');
     }
-    this.tryDayBossFromKill(a);
+
+    // Variant death effects (skip during screen nukes so clears stay clean).
+    if (!this.nuking) {
+      if (a.variant === 'necromantic' && !a.fromSplit) this.spawnNecroSplits(a);
+      if (a.variant === 'demonic') this.spawnDemonicFirePool(a);
+    }
+
+    if (!a.fromSplit) this.tryDayBossFromKill(a);
+  }
+
+  /** Necromantic beasts shatter into 3 weaker basic copies (no further splitting). */
+  spawnNecroSplits(a) {
+    if (!a || !SPECIES[a.species]) return;
+    const t = this.threat();
+    let spawned = 0;
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * TAU + rand(-0.25, 0.25);
+      const dist = rand(26, 52);
+      let x = a.x + Math.cos(ang) * dist;
+      let y = a.y + Math.sin(ang) * dist;
+      x = clamp(x, 80, this.world.w - 80);
+      y = clamp(y, 80, this.world.h - 80);
+      if (this.spawnInBase(x, y)) {
+        const far = this.findEnemySpawn(a.x, a.y, 40, 90, 20);
+        if (!far) continue;
+        x = far.x; y = far.y;
+      }
+      const child = new Animal(a.species, x, y, {
+        fromSplit: true,
+        variant: 'basic',
+        stars: Math.max(0, Math.floor((a.stars || 0) * 0.3)),
+        element: null,
+        swarm: !!a.swarm,
+        aggressive: true,
+        // Keep siege pressure if the parent was attacking the camp.
+        raider: !!(a.raider || a.assault),
+        assault: !!a.assault,
+        mult: {
+          hp: t.hp * 0.45,
+          dmg: t.dmg * 0.55,
+          speed: Math.min(1.25, t.speed + 0.06),
+        },
+        maxHp: Math.max(8, Math.round(a.maxHp * (a.boss ? 0.16 : 0.28))),
+      });
+      child.kx = Math.cos(ang) * rand(120, 220);
+      child.ky = Math.sin(ang) * rand(120, 220);
+      child.angry = 10;
+      child.state = 'chase';
+      this.animals.push(child);
+      spawned++;
+    }
+    if (!spawned || this.nuking) return;
+    this.fx.ring(a.x, a.y, 'rgba(110,220,150,0.75)', a.radius + 10, a.radius * 3.2, 0.55);
+    this.fx.sparks(a.x, a.y - a.bodyOff, 14, '#7dffb0');
+    this.addText(a.x, a.y - a.height - 8, 'Split!', '#7dffb0', 14, { life: 0.7 });
+    Sound.play('chitter');
+  }
+
+  /** Demonic beasts leave a large lingering fire pool. */
+  spawnDemonicFirePool(a) {
+    if (!a) return;
+    const r = Math.max(78, Math.round(a.radius * (a.boss ? 5.2 : 4.2) + 36));
+    const dps = Math.max(4, Math.round(a.attackDamage * (a.boss ? 1.1 : 0.9)));
+    this.hazards.push(new Hazard({
+      type: 'burn',
+      x: a.x,
+      y: a.y,
+      r,
+      life: a.boss ? 7.5 : 5.2,
+      dps,
+      element: 'fire',
+      color: '#ff3a1a',
+      owner: null,
+    }));
+    if (this.nuking) return;
+    this.fx.ring(a.x, a.y, 'rgba(255,70,30,0.85)', a.radius + 8, r, 0.65);
+    this.fx.elementHit(a.x, a.y - a.bodyOff * 0.4, 'fire', 2);
+    this.fx.sparks(a.x, a.y - 6, 16, '#ff6a3d');
+    Sound.play('throw', 0.6);
   }
 
   onOreBroken(rock) {
@@ -2065,30 +2186,45 @@ class Game {
     l.fillStyle = 'rgba(8,12,40,' + dark.toFixed(3) + ')';
     l.fillRect(0, 0, W, H);
     l.globalCompositeOperation = 'destination-out';
+    const cookie = this.lightCookie;
     for (const L of lights) {
       const sx = (L.x - x0) * k, sy = (L.y - y0) * k, r = L.r * k;
       if (sx + r < 0 || sy + r < 0 || sx - r > W || sy - r > H) continue;
-      const g = l.createRadialGradient(sx, sy, 0, sx, sy, r);
-      g.addColorStop(0, 'rgba(0,0,0,' + L.a + ')');
-      g.addColorStop(0.55, 'rgba(0,0,0,' + (L.a * 0.65) + ')');
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      l.fillStyle = g;
-      l.fillRect(sx - r, sy - r, r * 2, r * 2);
+      if (cookie) {
+        if (L.a < 0.999) l.globalAlpha = L.a;
+        l.drawImage(cookie, sx - r, sy - r, r * 2, r * 2);
+        if (L.a < 0.999) l.globalAlpha = 1;
+      } else {
+        const g = l.createRadialGradient(sx, sy, 0, sx, sy, r);
+        g.addColorStop(0, 'rgba(0,0,0,' + L.a + ')');
+        g.addColorStop(0.55, 'rgba(0,0,0,' + (L.a * 0.65) + ')');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        l.fillStyle = g;
+        l.fillRect(sx - r, sy - r, r * 2, r * 2);
+      }
     }
     ctx.drawImage(lc, 0, 0, vw, vh);
 
-    // warm additive glow around fires
+    // warm additive glow around fires (prebaked cookie + alpha)
     ctx.globalCompositeOperation = 'lighter';
     const z = this.zoom;
+    const warm = this.warmCookie;
+    const warmA = 0.22 * dark;
     for (const L of lights) {
       if (!L.warm) continue;
       const sx = (L.x - x0) * z, sy = (L.y - y0) * z, r = L.r * z * 0.6;
       if (sx + r < 0 || sy + r < 0 || sx - r > vw || sy - r > vh) continue;
-      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
-      g.addColorStop(0, 'rgba(255,140,50,' + (0.22 * dark).toFixed(3) + ')');
-      g.addColorStop(1, 'rgba(255,140,50,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+      if (warm) {
+        ctx.globalAlpha = warmA;
+        ctx.drawImage(warm, sx - r, sy - r, r * 2, r * 2);
+        ctx.globalAlpha = 1;
+      } else {
+        const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+        g.addColorStop(0, 'rgba(255,140,50,' + warmA.toFixed(3) + ')');
+        g.addColorStop(1, 'rgba(255,140,50,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+      }
     }
     ctx.globalCompositeOperation = 'source-over';
   }
