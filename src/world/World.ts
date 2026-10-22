@@ -252,14 +252,35 @@ export class World {
     }
   }
 
-  damageRock(rock: Rock, amount: number, goldRoll = Math.random()): HarvestResult {
+  /**
+   * Legacy Rock.damage + Game.onOreBroken.
+   * Hits have a chip chance; breaking always yields a threat/loot-scaled gold pile
+   * (an earlier port reused the chip roll on break, so ~88% of ores dropped nothing).
+   */
+  damageRock(
+    rock: Rock,
+    amount: number,
+    opts?: { goldRoll?: number; threatM?: number; lootMult?: number },
+  ): HarvestResult {
     if (!rock.isHittable()) return { killed: false };
     rock.hp -= amount;
-    const chipGold = goldRoll < 0.12 ? 1 : 0;
+    const goldRoll = opts?.goldRoll ?? Math.random();
+    const chipGold = goldRoll < 0.28 ? (goldRoll < 0.08 ? 2 : 1) : 0;
     if (rock.hp > 0) return { killed: false, gold: chipGold || undefined };
     rock.hp = 0;
     rock.dead = true;
-    return { killed: true, gold: chipGold || undefined };
+    // Legacy onOreBroken: always several gold × threat, plus any chip that rolled this hit.
+    const tm = opts?.threatM ?? 0;
+    const lootM = opts?.lootMult ?? 1;
+    const breakGold = Math.max(
+      3,
+      Math.round(
+        (4 + Math.floor(Math.random() * 4) + Math.floor(rock.size * 1.5)) *
+          (1 + tm * 0.18) *
+          Math.max(1, lootM),
+      ),
+    );
+    return { killed: true, gold: breakGold + chipGold };
   }
 
   addTree(x: number, y: number, rng: RNG, kind: TreeKind, size: number, indestructible = false) {

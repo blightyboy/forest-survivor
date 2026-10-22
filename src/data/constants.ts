@@ -12,6 +12,8 @@ export const NIGHT_DARKNESS = 0.8;
 export const RAID_DISTANCE = 1050;
 export const HIT_COOLDOWN = 0.3;
 export const MAX_PICKUPS = 160;
+/** Opening calm — wildlife won't hunt the player until struck or the timer ends. */
+export const START_GRACE = 30;
 export const WEAPON_MAX = 8;
 export const MAX_WEAPONS = 5;
 export const STAR_MAX = 15;
@@ -130,6 +132,14 @@ export const POWERUPS: Record<string, { name: string; label: string; color: stri
   fury: { name: 'Fury Flask', label: '2× Damage', color: '#ff8a3d', desc: 'Double weapon damage', duration: 14, weight: 26 },
   vital: { name: 'Vital Sap', label: '2× Regen', color: '#9ef08a', desc: 'Double health regeneration', duration: 14, weight: 22 },
   haste: { name: 'Wind Tonic', label: 'Speed', color: '#7fd3ff', desc: 'Greatly increased move speed', duration: 12, weight: 26 },
+  hearts: {
+    name: 'Crimson Charm',
+    label: 'Hearts',
+    color: '#ff5a7a',
+    desc: 'Slain foes may drop hearts that heal 10% max HP',
+    duration: 22,
+    weight: 20,
+  },
   nuke: { name: 'Cataclysm Orb', label: 'Nuke', color: '#ffe066', desc: 'Fell every tree and beast (not bosses); vacuum all drops', duration: 0, weight: 2.2 },
 };
 

@@ -64,69 +64,100 @@ function localBodyMetrics(a) {
 export function drawHitFlash(ctx, a) {
   const t = clamp(a.flash / 0.1, 0, 1);
   if (t <= 0) return;
-  const { bodyOff, h, r } = localBodyMetrics(a);
+  const { bodyOff, r } = localBodyMetrics(a);
+  // Radius-based — SPECIES height includes antlers/necks and blew this up on deer.
+  const cy = -Math.max(10, bodyOff * 0.9);
+  const rx = r * 1.2;
+  const ry = r * 0.78;
   ctx.save();
   ctx.globalAlpha = 0.12 + t * 0.22;
   ctx.fillStyle = '#fff6e8';
-  ellipse(ctx, 2, -bodyOff - h * 0.18, r * 1.15, h * 0.42);
+  ellipse(ctx, 2, cy, rx, ry);
   ctx.fill();
   ctx.globalAlpha = 0.08 + t * 0.14;
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2;
-  ellipse(ctx, 2, -bodyOff - h * 0.18, r * 1.2, h * 0.46);
+  ellipse(ctx, 2, cy, rx * 1.05, ry * 1.05);
   ctx.stroke();
   ctx.restore();
 }
 
-/** Outline hint for variants (local animal space). */
+/**
+ * Subtle torso tint ring for variants (local animal space).
+ * Sized from collision radius only — never SPECIES height (deer height is antlers,
+ * which used to paint a giant circle over the sprite).
+ */
 export function drawVariantRim(ctx, a, vDef) {
-  const { bodyOff, h, r } = localBodyMetrics(a);
+  const { bodyOff, r } = localBodyMetrics(a);
+  const cy = -Math.max(10, bodyOff * 0.9);
+  const rx = r * 1.12;
+  const ry = r * 0.7;
+  ctx.save();
+  ctx.globalAlpha = 0.55;
   ctx.strokeStyle = vDef.rim;
-  ctx.lineWidth = 2;
-  ellipse(ctx, 2, -bodyOff - h * 0.2, r * 1.12, h * 0.4);
+  ctx.lineWidth = Math.max(1.1, Math.min(2, r * 0.09));
+  ellipse(ctx, 2, cy, rx, ry);
   ctx.stroke();
+  ctx.restore();
 }
 
-/** Crimson back / shoulder spikes for demonic variants (local animal space — legacy fixed layout). */
+/**
+ * Crimson back / shoulder spikes for demonic variants (local animal space).
+ * Layout is normalized to body metrics so rats and bears both get spikes on the
+ * back — legacy used a fixed boar-sized fan that towered over small pests.
+ */
 export function drawDemonicSpikes(ctx, a) {
-  const baseY = -(a.sp?.bodyOff ?? a.bodyOff ?? 10) - 6;
+  const { bodyOff, h, r } = localBodyMetrics(a);
+  // Upper back line — sits just above the torso ellipse used by the rim.
+  const backY = -bodyOff - h * 0.12;
+  const span = Math.max(9, r * 0.95);
+  const rise = Math.max(7, h * 0.38);
+  const halfW = Math.max(1.2, r * 0.12);
+  const tipR = Math.max(0.7, r * 0.07);
+  // Normalized [baseX, baseYBias, tipX, tipY] — tipY -1 = full rise above back.
   const spikes = [
-    [-12, baseY + 2, -14, baseY - 14],
-    [-6, baseY, -7, baseY - 18],
-    [0, baseY - 1, 1, baseY - 20],
-    [6, baseY, 8, baseY - 17],
-    [12, baseY + 2, 15, baseY - 13],
-    [18, baseY + 6, 22, baseY - 6],
+    [-0.85, 0.12, -1.0, -0.72],
+    [-0.45, 0.02, -0.5, -0.92],
+    [0.0, -0.04, 0.05, -1.0],
+    [0.42, 0.02, 0.55, -0.88],
+    [0.82, 0.12, 1.0, -0.68],
+    [1.15, 0.28, 1.4, -0.32],
   ];
   ctx.lineJoin = 'round';
-  for (const [bx, by, tx, ty] of spikes) {
+  for (const [bxn, byn, txn, tyn] of spikes) {
+    const bx = bxn * span;
+    const by = backY + byn * rise * 0.2;
+    const tx = txn * span;
+    const ty = backY + tyn * rise;
     ctx.beginPath();
-    ctx.moveTo(bx - 2.2, by);
+    ctx.moveTo(bx - halfW, by);
     ctx.lineTo(tx, ty);
-    ctx.lineTo(bx + 2.2, by);
+    ctx.lineTo(bx + halfW, by);
     ctx.closePath();
     ctx.fillStyle = '#5a0a0a';
     ctx.fill();
     ctx.strokeStyle = '#1a0000';
-    ctx.lineWidth = 1.1;
+    ctx.lineWidth = Math.max(0.8, r * 0.06);
     ctx.stroke();
     ctx.fillStyle = '#ff3a2a';
-    ellipse(ctx, tx, ty, 1.2, 1.2);
+    ellipse(ctx, tx, ty, tipR, tipR);
     ctx.fill();
   }
 }
 
-/** Hollow green eyes for necromantic / undead variants. */
+/** Hollow green eyes for necromantic / undead variants (scaled to species eye). */
 export function drawNecroEyes(ctx, a) {
   const e = a.sp.eye || [16, -16];
+  const { r } = localBodyMetrics(a);
+  const er = Math.max(2.2, Math.min(3.6, r * 0.22));
   ctx.fillStyle = 'rgba(40, 80, 50, 0.55)';
-  ellipse(ctx, e[0], e[1], 3.2, 2.8);
+  ellipse(ctx, e[0], e[1], er, er * 0.88);
   ctx.fill();
   ctx.fillStyle = '#7dffb0';
-  ellipse(ctx, e[0], e[1], 1.6, 1.4);
+  ellipse(ctx, e[0], e[1], er * 0.5, er * 0.44);
   ctx.fill();
   ctx.fillStyle = '#0a1a10';
-  ellipse(ctx, e[0] + 0.3, e[1], 0.7, 0.9);
+  ellipse(ctx, e[0] + er * 0.1, e[1], er * 0.22, er * 0.28);
   ctx.fill();
 }
 
@@ -717,6 +748,8 @@ export function drawDeer(ctx, a, flash) {
 export function drawAnimalBody(ctx: Ctx, a: AnimalDrawView, windup: boolean, angry: boolean) {
   const flash = a.flash > 0;
   const vDef = ANIMAL_VARIANTS[a.variant as keyof typeof ANIMAL_VARIANTS];
+  // Rim under the body so it never paints over fur / antlers.
+  if (vDef?.rim) drawVariantRim(ctx, a as never, vDef as never);
   if (a.variant === 'demonic') drawDemonicSpikes(ctx, a as never);
   switch (animalFamily(a.species)) {
     case 'wolf': drawWolf(ctx, a as never, flash, windup, angry); break;
@@ -731,7 +764,6 @@ export function drawAnimalBody(ctx: Ctx, a: AnimalDrawView, windup: boolean, ang
     case 'beaver': drawBeaver(ctx, a as never, flash, windup); break;
     default: drawBoar(ctx, a as never, flash, windup, angry);
   }
-  if (vDef && (vDef as { rim?: boolean }).rim) drawVariantRim(ctx, a as never, vDef as never);
   if (a.variant === 'necromantic') drawNecroEyes(ctx, a as never);
   if (a.boss) drawCrown(ctx, a.sp.eye[0] - 3, a.sp.eye[1] - 11);
   if (flash) drawHitFlash(ctx, a as never);

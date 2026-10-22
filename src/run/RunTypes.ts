@@ -1,7 +1,7 @@
 import type { ElementId } from '../data/constants';
 import type { GearItem, EquipmentLoadout } from '../data/shop';
 
-export type PickupKind = 'xp' | 'wood' | 'meat' | 'gold' | 'powerup';
+export type PickupKind = 'xp' | 'wood' | 'meat' | 'gold' | 'heart' | 'powerup';
 
 export interface RunPlayer {
   x: number;
@@ -66,6 +66,14 @@ export interface RunPlayer {
   buffFury: number;
   buffVital: number;
   buffHaste: number;
+  /** Crimson Charm — slain foes may drop healing hearts. */
+  buffHearts: number;
+  /** Accrues fractional poison damage for tick feedback (legacy poisonAcc). */
+  poisonAcc?: number;
+  /** Accrues fractional fire-pool DoT for tick feedback. */
+  burnAcc?: number;
+  /** Seconds left showing "Burn" debuff while standing in a damage pool. */
+  burnT?: number;
 }
 
 export interface RunStats {

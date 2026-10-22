@@ -18,11 +18,13 @@ import type { RunPlayer } from '../run/RunTypes';
 import type { LevelUpCard } from '../data/passives';
 import { clamp, damp, formatNum } from '../core/math';
 import { cameraZoom, cameraWorldBounds } from '../core/renderScale';
-import { threatAt, UPGRADES, isBossNight, ELEMENTS, upgradeCost } from '../data/constants';
+import { threatAt, UPGRADES, isBossNight, ELEMENTS, upgradeCost, START_GRACE } from '../data/constants';
+import { COACH_STEPS } from '../data/tutorials';
 import { Music } from '../audio/Music';
 import { settings } from '../meta/Settings';
 import { equipItem, recomputePlayerStats } from '../systems/PlayerStats';
 import { BOSS_NAMES } from '../data/animals';
+import type { BossAbilityId } from '../systems/EnemyAbilities';
 import { CanvasSprite } from '../art/draw/CanvasSprite';
 import { drawPlayer } from '../art/draw/playerDraw';
 import { GroundLayer } from '../art/ground';
@@ -76,6 +78,15 @@ export class RunScene extends Phaser.Scene {
   tutorialSilentPause = false;
   tutorialOpen: string | null = null;
   tutorialQueue: string[] = [];
+  /** Coach tips already shown this run (tips replay each run while Options → Tutorials is On). */
+  tutorialsShownThisRun = new Set<string>();
+  /** Show level-up cards after the first level-up coach dismisses. */
+  pendingLevelUpAfterTutor = false;
+  /** Seconds into the run — used to time the controls coach. */
+  tutRunAge = 0;
+  tutDashSeen = false;
+  /** First beast the player hit this run — world spotlight for the enemy coach. */
+  tutorBeastFocus: { x: number; y: number; radius: number } | null = null;
   /** Virtual joystick — drag on the canvas (legacy Input.joy). */
   private joy = { active: false, id: -1, ox: 0, oy: 0, x: 0, y: 0 };
   keys!: {
@@ -103,6 +114,8 @@ export class RunScene extends Phaser.Scene {
     NINE: Phaser.Input.Keyboard.Key;
   };
   runStart = 0;
+  /** Opening calm — wildlife won't hunt until struck or this hits 0. */
+  graceLeft = 0;
   /** Collected in update; punched in prerender after the camera scrolls. */
   private pendingLights: LightSource[] = [];
   private pendingDuskTint = 0;
@@ -123,6 +136,11 @@ export class RunScene extends Phaser.Scene {
     this.tutorialSilentPause = false;
     this.tutorialOpen = null;
     this.tutorialQueue = [];
+    this.tutorialsShownThisRun = new Set();
+    this.pendingLevelUpAfterTutor = false;
+    this.tutRunAge = 0;
+    this.tutDashSeen = false;
+    this.tutorBeastFocus = null;
     this.joy.active = false;
     this.playerFacing = 1;
     this.playerWalkTime = 0;
@@ -136,6 +154,7 @@ export class RunScene extends Phaser.Scene {
     this.assault = new AssaultSystem();
     this.dayNight = new DayNightSystem();
     this.runStart = this.time.now;
+    this.graceLeft = START_GRACE;
     this.world = new World();
     // World entities Y-sort via child depth; FX (projectiles, float text) stay above.
     this.worldLayer = this.add.container(0, 0).setDepth(0);
@@ -207,6 +226,10 @@ export class RunScene extends Phaser.Scene {
       buffFury: 0,
       buffVital: 0,
       buffHaste: 0,
+      buffHearts: 0,
+      poisonAcc: 0,
+      burnAcc: 0,
+      burnT: 0,
     };
     this.arsenal.addWeapon('axe', 1);
     this.arsenal.applyMetaRunStart(this.player, bonuses);
@@ -266,6 +289,7 @@ export class RunScene extends Phaser.Scene {
     this.combat.onFloatText = (x, y, msg, color, size, opts) =>
       this.floatText.spawn(x, y, msg, color, size, opts);
     this.combat.onShake = (intensity) => this.shake(intensity);
+    this.combat.onAnimalHit = (a) => this.onPlayerHitBeast(a);
     this.camp.onShake = (intensity) => this.shake(intensity);
     this.camp.onFloatText = (x, y, msg, color, size, opts) =>
       this.floatText.spawn(x, y, msg, color, size, opts);
@@ -295,6 +319,7 @@ export class RunScene extends Phaser.Scene {
     this.combat.onPowerupBanner = (title, sub, color) => this.ui.banner(title, sub, color);
     this.camp.onCampAttack = () =>
       this.ui.banner('The camp is under attack!', 'Defend the cabin or the run is over.', '#ff6b6b');
+    this.camp.onStructureHit = () => this.ui.flashCampHurt();
     this.camp.onRaidStart = (day, count, directions) => {
       this.ui.banner(
         `Night ${day}: RAID!`,
@@ -322,7 +347,7 @@ export class RunScene extends Phaser.Scene {
     this.ui.refreshCampPanel(this.camp, this.player, this.camp.contains(this.player.x, this.player.y, 30));
     this.ui.banner(
       'Day 1',
-      'Chop, hunt, fortify. Assault waves march on camp — full raids hit at night!',
+      `Chop, hunt, fortify. Wildlife ignores you and the camp for ${START_GRACE}s — strike first and they fight back.`,
       '#ffe08a',
     );
     this.day1BannerShown = true;
@@ -482,6 +507,61 @@ export class RunScene extends Phaser.Scene {
     };
     ui.onQuitRun = () => this.endRun(false);
     ui.onTutorialDismiss = () => this.dismissTutorial();
+    ui.onCoachWorldRect = (key) => this.coachWorldRect(key);
+  }
+
+  /** Screen-space rect for world coach targets (dash bar / first-hit beast). */
+  private coachWorldRect(key: string): { x: number; y: number; w: number; h: number } | null {
+    if (!this.cameras?.main) return null;
+    if (key === 'playerDash') {
+      if (!this.player) return null;
+      return this.worldToCoachRect(this.player.x, this.player.y + 10, 32, 10);
+    }
+    if (key === 'hitBeast') {
+      const focus = this.tutorBeastFocus;
+      if (!focus) return null;
+      // Body sits above feet; pad enough to cover stars / element orbs.
+      const r = Math.max(18, focus.radius);
+      const w = r * 2.8;
+      const h = r * 3.2;
+      return this.worldToCoachRect(focus.x, focus.y - r * 0.85, w, h);
+    }
+    return null;
+  }
+
+  private worldToCoachRect(
+    cx: number,
+    cy: number,
+    worldW: number,
+    worldH: number,
+  ): { x: number; y: number; w: number; h: number } | null {
+    const cam = this.cameras.main;
+    const canvas = this.game.canvas;
+    const crect = canvas.getBoundingClientRect();
+    const wv = cam.worldView;
+    if (wv.width <= 0 || wv.height <= 0 || crect.width <= 0) return null;
+    const toScreen = (wx: number, wy: number) => ({
+      x: crect.left + ((wx - wv.x) / wv.width) * crect.width,
+      y: crect.top + ((wy - wv.y) / wv.height) * crect.height,
+    });
+    const tl = toScreen(cx - worldW / 2, cy - worldH / 2);
+    const br = toScreen(cx + worldW / 2, cy + worldH / 2);
+    return {
+      x: Math.min(tl.x, br.x),
+      y: Math.min(tl.y, br.y),
+      w: Math.max(28, Math.abs(br.x - tl.x)),
+      h: Math.max(16, Math.abs(br.y - tl.y)),
+    };
+  }
+
+  /** Coach: spotlight the first beast the player damages. */
+  private onPlayerHitBeast(a: { x: number; y: number; radius: number; dead?: boolean }) {
+    if (!settings.shouldShowTutorial('enemy')) return;
+    if (this.tutorialsShownThisRun.has('enemy')) return;
+    if (!this.tutorBeastFocus) {
+      this.tutorBeastFocus = { x: a.x, y: a.y, radius: a.radius };
+    }
+    this.offerTutorial('enemy');
   }
 
   tryCampUpgrade(id: string) {
@@ -582,21 +662,33 @@ export class RunScene extends Phaser.Scene {
     if (pointer.id === this.joy.id) this.joy.active = false;
   }
 
-  /** Legacy Game.offerTutorial — silent pause + tip modal. */
+  /** Spotlight coach — pauses the run and highlights a HUD target. */
   offerTutorial(id: string) {
     if (!settings.shouldShowTutorial(id)) return false;
+    if (this.tutorialsShownThisRun.has(id)) return false;
+    if (!COACH_STEPS[id]) return false;
     if (!this.player.alive) return false;
     if (this.tutorialOpen || this.ui.isTutorialOpen()) {
       if (!this.tutorialQueue.includes(id)) this.tutorialQueue.push(id);
       return false;
     }
-    settings.markTutorialSeen(id);
+    this.tutorialsShownThisRun.add(id);
     this.tutorialOpen = id;
     if (!this.paused && !this.levelUpOpen) {
       this.tutorialSilentPause = true;
       this.paused = true;
     } else {
       this.tutorialSilentPause = false;
+    }
+    const def = COACH_STEPS[id];
+    if (def.prepare === 'camp' || def.prepare === 'smith') {
+      this.ui.setCampPanelOpen(true);
+      this.ui.setCampSmithTab(def.prepare === 'smith');
+      this.ui.refreshCampPanel(
+        this.camp,
+        this.player,
+        this.camp.contains(this.player.x, this.player.y, 30),
+      );
     }
     this.ui.showTutorial(id);
     Audio.playSfx('click');
@@ -612,46 +704,96 @@ export class RunScene extends Phaser.Scene {
       this.paused = false;
     }
     this.tutorialSilentPause = false;
+
+    if (this.pendingLevelUpAfterTutor) {
+      this.pendingLevelUpAfterTutor = false;
+      this.openLevelUp();
+      return;
+    }
+
     while (this.tutorialQueue.length) {
       const next = this.tutorialQueue.shift()!;
       if (this.offerTutorial(next)) return;
     }
   }
 
-  /** Legacy Game.updateTutorials — enemy near / first affordable fortification. */
+  private canOfferTutorial(id: string) {
+    return settings.shouldShowTutorial(id) && !this.tutorialsShownThisRun.has(id);
+  }
+
+  /** Fire coach steps when the player hits first-time milestones. */
   private updateTutorials() {
     if (!settings.tutorialsEnabled) return;
     if (this.paused || this.levelUpOpen) return;
     if (this.tutorialOpen || this.ui.isTutorialOpen()) return;
 
-    if (settings.shouldShowTutorial('enemy')) {
-      const p = this.player;
-      const R2 = 460 * 460;
-      for (const a of this.animals.animals) {
-        if (a.dead || a.leaving) continue;
-        const dx = a.x - p.x;
-        const dy = a.y - p.y;
-        if (dx * dx + dy * dy < R2) {
-          this.offerTutorial('enemy');
-          return;
-        }
+    const p = this.player;
+
+    // 1) Controls — shortly after the run begins.
+    if (this.canOfferTutorial('controls') && this.tutRunAge >= 2.2) {
+      this.offerTutorial('controls');
+      return;
+    }
+
+    // 2) First XP shard collected.
+    if (this.canOfferTutorial('xp') && (p.xp > 0 || p.level > 1)) {
+      this.offerTutorial('xp');
+      return;
+    }
+
+    // 3) First resource into the bag.
+    if (
+      this.canOfferTutorial('resources') &&
+      p.woodCollected + p.meatCollected + p.goldCollected > 0
+    ) {
+      this.offerTutorial('resources');
+      return;
+    }
+
+    // 4) Know your beasts — triggered on first weapon hit (see onPlayerHitBeast).
+
+    // 5) Dash charges after the first dash.
+    if (this.canOfferTutorial('dash') && this.tutDashSeen) {
+      this.offerTutorial('dash');
+      return;
+    }
+
+    // 6) Loadout once a second weapon / passive exists, or axe is upgraded.
+    if (this.canOfferTutorial('loadout')) {
+      const weapons = this.arsenal.weaponOrder.length;
+      const passives = Object.keys(this.arsenal.passives).filter((k) => (this.arsenal.passives[k] || 0) > 0)
+        .length;
+      const axeLv = this.arsenal.weapons.axe || 0;
+      if (weapons > 1 || passives > 0 || axeLv > 1) {
+        this.offerTutorial('loadout');
+        return;
       }
     }
 
-    if (settings.shouldShowTutorial('build')) {
+    // 7) Can afford a basic fortification.
+    if (this.canOfferTutorial('build')) {
       const walls = UPGRADES.find((u) => u.id === 'walls');
       const towers = UPGRADES.find((u) => u.id === 'towers');
       const can = (u: (typeof UPGRADES)[number] | undefined, lv: number) => {
         if (!u || lv >= u.max) return false;
         const cost = upgradeCost(u, lv);
         return (
-          this.player.wood >= (cost.wood || 0) &&
-          this.player.meat >= (cost.meat || 0) &&
-          this.player.gold >= (cost.gold || 0)
+          p.wood >= (cost.wood || 0) &&
+          p.meat >= (cost.meat || 0) &&
+          p.gold >= (cost.gold || 0)
         );
       };
       if (can(walls, this.camp.levels.walls || 0) || can(towers, this.camp.levels.towers || 0)) {
         this.offerTutorial('build');
+        return;
+      }
+    }
+
+    // 8) Threat climbing — after the first night or when threat ramps.
+    if (this.canOfferTutorial('threat')) {
+      const threat = threatAt(this.dayNight.runTime);
+      if (this.dayNight.dayNumber >= 2 || threat.hp >= 1.25) {
+        this.offerTutorial('threat');
       }
     }
   }
@@ -663,6 +805,11 @@ export class RunScene extends Phaser.Scene {
     this.floatText.spawn(p.x, p.y - 90, `LEVEL ${p.level}!`, '#ffd23f', 26, { life: 1.6, vy: -30 });
     this.floatText.spawn(p.x, p.y - 112, '+10 Max HP', '#9ef08a', 14, { life: 1.2, vy: -24 });
     this.vfx?.ring(p.x, p.y, 'rgba(255,210,63,0.95)', 10, 260, 0.6);
+    if (this.canOfferTutorial('levelup')) {
+      this.pendingLevelUpAfterTutor = true;
+      this.offerTutorial('levelup');
+      return;
+    }
     this.openLevelUp();
   }
 
@@ -706,6 +853,8 @@ export class RunScene extends Phaser.Scene {
 
     this.updatePlayer(dt);
     this.updateTutorials();
+    if (this.graceLeft > 0) this.graceLeft = Math.max(0, this.graceLeft - dt);
+    this.tutRunAge += dt;
     const threat = threatAt(this.dayNight.runTime);
     const dayEvt = this.dayNight.update(dt);
     this.handleDayEvents(dayEvt, threat);
@@ -722,6 +871,7 @@ export class RunScene extends Phaser.Scene {
       this.dayNight.isNight,
       this.dayNight.dayNumber,
       threat.m,
+      this.graceLeft,
       () => {
         this.ui.setTip('Night raid — defend the camp!');
       },
@@ -738,6 +888,8 @@ export class RunScene extends Phaser.Scene {
       this.dayNight.isNight,
       // Hold daytime assaults while a night raid is active (legacy raid.active).
       this.camp.raidActive,
+      // Hold assaults during start-of-run grace.
+      this.graceLeft,
       (title, sub, color) => this.ui.banner(title, sub, color),
     );
     this.animals.update(
@@ -748,6 +900,7 @@ export class RunScene extends Phaser.Scene {
       threat.m,
       this.dayNight.isNight,
       this.dayNight.dayNumber,
+      this.graceLeft,
     );
     this.combat.update(dt, this.player);
     this.world.updateTrees(dt, this.player.x, this.player.y);
@@ -788,6 +941,7 @@ export class RunScene extends Phaser.Scene {
       this.animals.animals,
     );
     this.ui.updateHud(this.player, this.dayNight, this.camp, this.arsenal, dt);
+    this.ui.updateEventHud(this.graceLeft);
     this.ui.refreshCampPanel(
       this.camp,
       this.player,
@@ -966,12 +1120,19 @@ export class RunScene extends Phaser.Scene {
     }
     if (dayEvt.enteredNight) {
       Audio.playSfx('howl');
-      this.camp.startNightRaid(this.dayNight.dayNumber, this.animals, threat.m);
+      this.camp.startNightRaid(this.dayNight.dayNumber, this.animals, threat.m, this.graceLeft);
     }
   }
 
   private syncBossHud() {
-    let boss: { name: string; hp: number; maxHp: number; trueBoss?: boolean } | null = null;
+    let boss: {
+      name: string;
+      hp: number;
+      maxHp: number;
+      trueBoss?: boolean;
+      element?: string | null;
+      bossMoves?: BossAbilityId[];
+    } | null = null;
     for (const a of this.animals.animals) {
       if (a.dead || !a.boss) continue;
       const candidate = {
@@ -979,6 +1140,8 @@ export class RunScene extends Phaser.Scene {
         hp: a.hp,
         maxHp: a.maxHp,
         trueBoss: a.trueBoss,
+        element: a.element,
+        bossMoves: a.trueBoss ? a.bossMoves : undefined,
       };
       if (!boss || (a.trueBoss && !boss.trueBoss) || a.hp > boss.hp) boss = candidate;
     }
@@ -1046,6 +1209,7 @@ export class RunScene extends Phaser.Scene {
       p.vy = dy * power;
       p.dashT = 0.22;
       p.dashCharges--;
+      this.tutDashSeen = true;
       if (p.dashCharges < p.dashMax && p.dashCd <= 0) p.dashCd = p.dashCdMax;
       p.invuln = Math.max(p.invuln, 0.22);
       if (Math.abs(dx) > 0.1) this.playerFacing = dx > 0 ? 1 : -1;
@@ -1065,12 +1229,31 @@ export class RunScene extends Phaser.Scene {
         if (b.life <= 0) p.poisons.splice(i, 1);
       }
       if (poisonDmg > 0 && p.alive) {
-        p.hp -= poisonDmg;
-        if (p.hp <= 0) {
-          p.hp = 0;
-          p.alive = false;
+        // Legacy: accumulate to whole-number ticks so the player sees green damage pops.
+        p.poisonAcc = (p.poisonAcc || 0) + poisonDmg;
+        if (p.poisonAcc >= 1) {
+          const tick = Math.floor(p.poisonAcc);
+          p.poisonAcc -= tick;
+          p.hp -= tick;
+          this.floatText.spawn(
+            p.x + (Math.random() * 16 - 8),
+            p.y - 36,
+            String(tick),
+            '#6dd46a',
+            13,
+            { life: 0.55, vy: -24 },
+          );
+          this.vfx?.sparks(p.x, p.y - 8, 4, '#6dd46a');
+          if (Math.random() < 0.35) Audio.playSfx('hurt', 0.55);
+          if (p.hp <= 0) {
+            p.hp = 0;
+            p.alive = false;
+            Audio.playSfx('death');
+          }
         }
       }
+    } else {
+      p.poisonAcc = 0;
     }
 
     // moveMult already includes Wind Tonic (×1.65) via applyBuffMultipliers.
@@ -1123,7 +1306,10 @@ export class RunScene extends Phaser.Scene {
     const invQ = p.invuln > 0 ? Math.ceil(p.invuln * 8) : 0;
     const hpQ = Math.round((p.hp / Math.max(1, p.maxHp)) * 20);
     const dashQ = Math.round(p.dashCharges * 4) + (p.dashCd > 0 ? Math.ceil(p.dashCd * 4) : 0);
-    const key = `${this.playerFacing}|${walkFrame}|${flashQ}|${invQ}|${hpQ}|${dashQ}|${p.alive ? 1 : 0}`;
+    const poisoned = p.poisons.length > 0;
+    const burning = (p.burnT || 0) > 0;
+    const slowed = p.slowT > 0 && p.slow > 0.05;
+    const key = `${this.playerFacing}|${walkFrame}|${flashQ}|${invQ}|${hpQ}|${dashQ}|${poisoned ? 1 : 0}|${burning ? 1 : 0}|${slowed ? 1 : 0}|${p.alive ? 1 : 0}`;
     if (key === this.playerDrawKey) return;
     this.playerDrawKey = key;
     this.playerCanvas.clear();
@@ -1141,6 +1327,9 @@ export class RunScene extends Phaser.Scene {
         dashMax: p.dashMax,
         dashCd: p.dashCd,
         dashCdMax: p.dashCdMax,
+        poisoned,
+        burning,
+        slowed,
       });
     });
     this.playerCanvas.refresh();
@@ -1396,6 +1585,7 @@ export class RunScene extends Phaser.Scene {
       if (p.kind === 'wood') tex = 'pickup_wood';
       else if (p.kind === 'meat') tex = 'pickup_meat';
       else if (p.kind === 'gold') tex = 'pickup_gold';
+      else if (p.kind === 'heart') tex = 'pickup_heart';
       else if (p.kind === 'powerup' && p.powerupId) {
         const key = `pickup_${p.powerupId}`;
         tex = this.textures.exists(key) ? key : 'pickup_xp';
@@ -1407,7 +1597,10 @@ export class RunScene extends Phaser.Scene {
         p.kind === 'powerup'
           ? 1
           : clamp(0.9 + Math.log2(1 + (p.amount || 1)) * 0.22, 0.9, 2.1);
-      const pulse = p.kind === 'powerup' ? 1 + Math.sin(t * 8 + p.phase) * 0.08 : 1;
+      const pulse =
+        p.kind === 'powerup' || p.kind === 'heart'
+          ? 1 + Math.sin(t * 8 + p.phase) * 0.08
+          : 1;
       // Legacy gold coin squashes with cos spin; wood/meat use drop rotation.
       const sx =
         p.kind === 'gold'
@@ -1415,7 +1608,7 @@ export class RunScene extends Phaser.Scene {
           : q * pulse;
       const sy = q * pulse;
       const rot =
-        p.kind === 'powerup' || p.kind === 'gold' || p.kind === 'xp'
+        p.kind === 'powerup' || p.kind === 'gold' || p.kind === 'xp' || p.kind === 'heart'
           ? p.kind === 'xp'
             ? t * 3 + p.phase
             : 0
@@ -1440,7 +1633,9 @@ export class RunScene extends Phaser.Scene {
               ? '#ffe066'
               : p.kind === 'meat'
                 ? '#ffb0a0'
-                : '#ffd9a0';
+                : p.kind === 'heart'
+                  ? '#ff5a7a'
+                  : '#ffd9a0';
         label
           .setText(v >= 1000 ? formatNum(v) : String(v))
           .setColor(col)
@@ -1521,6 +1716,7 @@ export class RunScene extends Phaser.Scene {
     this.ui.hidePause();
     this.ui.hideLevelUp();
     this.ui.hideCampShop();
+    this.ui.cancelConfirm();
     this.ui.showGameOver(
       {
         reason: p.alive ? 'camp' : 'death',
@@ -1540,9 +1736,20 @@ export class RunScene extends Phaser.Scene {
         totalCredits: meta.credits,
       },
       () => {
+        this.ui.cancelConfirm();
         this.scene.start('MenuScene');
       },
     );
+    if (settings.tutorialsEnabled) {
+      this.ui.askConfirm({
+        title: 'Turn off tutorials?',
+        message:
+          'Coach tips will keep showing every run while Tutorials are On. Turn them off now, or leave them On for the next run.',
+        confirmLabel: 'Turn off',
+        cancelLabel: 'Keep on',
+        onConfirm: () => settings.setTutorialsEnabled(false),
+      });
+    }
   }
 
   shutdown() {

@@ -103,6 +103,13 @@ export class CombatSystem {
   killCtx: KillContext = { isNight: false, dayNumber: 1, threatM: 0 };
   private metaBonuses: MetaBonuses = {} as MetaBonuses;
   nuking = false;
+  /**
+   * While true, spawnPickup grants loot straight to the player (cataclysm vacuum).
+   * Avoids MAX_PICKUPS overflow wiping ground drops during mass kills.
+   */
+  private nukeAbsorb = false;
+  /** Tallies loot absorbed during the current nuke for the inbound banner. */
+  private nukeAbsorbed = 0;
   /** Last player passed to update / powerups — used when auto-granting overflow pickups. */
   private grantPlayer: RunPlayer | null = null;
   vfx: import('./FxSystem').FxSystem | null = null;
@@ -117,6 +124,8 @@ export class CombatSystem {
   ) => void;
   /** Legacy addShake — wired from RunScene. */
   onShake?: (intensity: number) => void;
+  /** Fired when a player weapon/proc damages a beast (not thorns / DoT pools). */
+  onAnimalHit?: (a: AnimalEntity) => void;
 
   constructor(
     private scene: Phaser.Scene,
@@ -174,6 +183,27 @@ export class CombatSystem {
    */
   spawnPickup(kind: Pickup['kind'], x: number, y: number, amount: number, powerupId?: string) {
     const value = Math.max(1, Math.round(amount));
+    // Cataclysm: pull loot straight into the bag — ground piles were getting culled by the
+    // pickup cap when hundreds of beasts died in one frame.
+    if (this.nukeAbsorb && kind !== 'powerup') {
+      this.grantPickupDirect({
+        kind,
+        x,
+        y,
+        amount: value,
+        vx: 0,
+        vy: 0,
+        z: 0,
+        vz: 0,
+        age: 1,
+        rot: 0,
+        phase: 0,
+        dead: false,
+      });
+      this.nukeAbsorbed++;
+      return;
+    }
+    // Hearts stack nearby so multi-kills don't litter the ground.
     if (kind !== 'powerup') {
       const STACK_R2 = 78 * 78;
       for (const pk of this.pickups) {
@@ -229,7 +259,11 @@ export class CombatSystem {
     const player = this.grantPlayer;
     if (!player || p.kind === 'powerup') return;
     if (p.kind === 'xp') this.grantXp(player, p.amount);
-    else if (p.kind === 'gold' || p.kind === 'wood' || p.kind === 'meat') {
+    else if (p.kind === 'heart') {
+      const stacks = Math.max(1, p.amount || 1);
+      const heal = Math.max(1, Math.round(player.maxHp * 0.1 * stacks));
+      player.hp = Math.min(player.maxHp, player.hp + heal);
+    } else if (p.kind === 'gold' || p.kind === 'wood' || p.kind === 'meat') {
       gainResource(player, p.kind, p.amount);
     }
   }
@@ -284,6 +318,7 @@ export class CombatSystem {
     if (type === 'fury') player.buffFury = Math.max(player.buffFury, def.duration);
     else if (type === 'vital') player.buffVital = Math.max(player.buffVital, def.duration);
     else if (type === 'haste') player.buffHaste = Math.max(player.buffHaste, def.duration);
+    else if (type === 'hearts') player.buffHearts = Math.max(player.buffHearts, def.duration);
     this.refreshBuffStats(player);
     this.onPowerupBanner?.(def.name, `${def.desc} · ${def.duration}s`, def.color);
   }
@@ -295,6 +330,7 @@ export class CombatSystem {
     let n = 0;
     for (const p of this.pickups) {
       if (p.dead || p.kind === 'powerup') continue;
+      // Hearts, XP, and resources all rush in.
       p.magnet = true;
       p.speed = 2200;
       p.age = Math.max(p.age, 0.35);
@@ -306,10 +342,26 @@ export class CombatSystem {
     }
   }
 
+  /** Instantly grant every ground resource / XP / heart (leaves powerups). */
+  private absorbAllLoot(player: RunPlayer) {
+    this.grantPlayer = player;
+    let n = 0;
+    for (const p of this.pickups) {
+      if (p.dead || p.kind === 'powerup') continue;
+      this.grantPickupDirect(p);
+      p.dead = true;
+      n++;
+    }
+    if (n) compactInPlace(this.pickups, (p) => p.dead);
+    return n;
+  }
+
   /** Wipe every tree and non-boss beast. Bosses survive. Full loot + vacuum all drops. */
   triggerNuke(player: RunPlayer) {
     this.grantPlayer = player;
     this.nuking = true;
+    this.nukeAbsorb = true;
+    this.nukeAbsorbed = 0;
     Audio.playSfx('boom');
     this.onShake?.(1.15);
     // Legacy cataclysm flash — expanding rings + spark burst.
@@ -320,10 +372,12 @@ export class CombatSystem {
 
     let beasts = 0;
     let trees = 0;
-    // Full loot (do NOT pass fromSplit — that was cutting drops). Bosses endure.
-    for (const a of this.animals.animals) {
+    // Snapshot — avoid skipping entries if the live list shifts mid-kill.
+    const victims = this.animals.animals.slice();
+    const lootCtx = { ...this.killCtx, fromSplit: false };
+    for (const a of victims) {
       if (a.dead || a.boss || a.trueBoss) continue;
-      this.animals.damageAnimal(a, a.maxHp + 9999, player, this.pickups, this.pools, this.killCtx);
+      this.animals.damageAnimal(a, a.maxHp + 9999, player, this.pickups, this.pools, lootCtx);
       beasts++;
     }
     for (const t of this.world.trees) {
@@ -335,13 +389,18 @@ export class CombatSystem {
         trees++;
       }
     }
+    this.nukeAbsorb = false;
     this.nuking = false;
-    // Pull every resource / XP shard on the map into the player.
-    this.vacuumPickups(player, { ring: 'rgba(255,224,102,0.9)', label: '#ffe066' });
+    // Sweep anything already on the ground (pre-nuke drops).
+    const swept = this.absorbAllLoot(player);
+    this.vfx?.ring(player.x, player.y, 'rgba(255,224,102,0.9)', 40, 520, 0.7);
+    const inbound = this.nukeAbsorbed + swept;
     this.onFloatText?.(
       player.x,
       player.y - 96,
-      `${trees} trees · ${beasts} beasts`,
+      inbound > 0
+        ? `${trees} trees · ${beasts} beasts · ${inbound} drops`
+        : `${trees} trees · ${beasts} beasts`,
       '#ffe066',
       18,
       { life: 1.6, vy: -30 },
@@ -452,6 +511,7 @@ export class CombatSystem {
     if (player.buffFury > 0) player.buffFury = Math.max(0, player.buffFury - dt);
     if (player.buffVital > 0) player.buffVital = Math.max(0, player.buffVital - dt);
     if (player.buffHaste > 0) player.buffHaste = Math.max(0, player.buffHaste - dt);
+    if (player.buffHearts > 0) player.buffHearts = Math.max(0, player.buffHearts - dt);
     this.refreshBuffStats(player);
     this.tickHitCds(dt);
 
@@ -1186,6 +1246,7 @@ export class CombatSystem {
     if (atk) this.vfx?.elementHit(a.x, a.y - a.radius * 0.8, atk, aff);
     Audio.playSfx('hit', rand(0.9, 1.1));
     if (crit) this.onShake?.(0.1);
+    this.onAnimalHit?.(a);
     const killed = this.animals.damageAnimal(a, dmg, player, this.pickups, this.pools, this.killCtx);
     if (!killed) this.vfx?.hitPuff(a.x, a.y - a.radius * 1.5, 4);
     // Legacy: lifesteal on every non-proc-skipped hit, not only on kill.
@@ -1257,12 +1318,19 @@ export class CombatSystem {
         this.onStaticKilled?.(s);
       }
     } else if (s.type === 'rock') {
-      const res = this.world.damageRock(s, dmg);
+      const oreLoot =
+        (1 + 0.18 * (this.arsenal.passives.greed || 0)) * (1 + (this.killCtx.threatM || 0) * 0.08);
+      const res = this.world.damageRock(s, dmg, {
+        threatM: this.killCtx.threatM,
+        lootMult: oreLoot,
+      });
       this.vfx?.rockChips(s.x, s.y - 8, res.killed ? 12 : 5);
       Audio.playSfx('ore', rand(0.9, 1.2));
       if (res.gold) this.spawnPickup('gold', s.x, s.y, res.gold);
       if (res.killed) {
+        this.vfx?.sparkle(s.x, s.y - 10, '#ffe082');
         this.onShake?.(0.25);
+        Audio.playSfx('treeFall');
         this.onStaticKilled?.(s);
       }
     }
@@ -1308,6 +1376,20 @@ export class CombatSystem {
         else if (p.kind === 'xp') {
           this.grantXp(player, p.amount);
           Audio.playSfx('xp');
+        } else if (p.kind === 'heart') {
+          const stacks = Math.max(1, p.amount || 1);
+          const heal = Math.max(1, Math.round(player.maxHp * 0.1 * stacks));
+          const before = player.hp;
+          player.hp = Math.min(player.maxHp, player.hp + heal);
+          const gained = Math.max(0, Math.round(player.hp - before));
+          if (gained > 0) {
+            this.onFloatText?.(player.x, player.y - 52, `+${gained}`, '#ff5a7a', 16, {
+              life: 0.9,
+              vy: -28,
+            });
+            this.vfx?.sparkle(player.x, player.y - 10, '#ff5a7a');
+          }
+          Audio.playSfx('pickup', 1.05);
         } else if (p.kind === 'gold' || p.kind === 'wood' || p.kind === 'meat') {
           gainResource(player, p.kind, p.amount);
           if (p.kind === 'gold') Audio.playSfx('gold');
@@ -1354,16 +1436,15 @@ export class CombatSystem {
   }
 
   private updatePools(dt: number, player: RunPlayer) {
+    let inPool = false;
+    let poolDmg = 0;
     for (const pool of this.pools) {
       if (pool.dead) continue;
       pool.life -= dt;
       if (pool.life <= 0) pool.dead = true;
       if (dist2(pool.x, pool.y, player.x, player.y) < pool.r * pool.r) {
-        player.hp -= pool.dmg * dt;
-        if (player.hp <= 0) {
-          player.hp = 0;
-          player.alive = false;
-        }
+        inPool = true;
+        poolDmg += pool.dmg * dt;
       }
       for (const a of this.animals.animals) {
         if (a.dead) continue;
@@ -1371,6 +1452,31 @@ export class CombatSystem {
           this.animals.damageAnimal(a, pool.dmg * dt * 0.5, player, this.pickups, this.pools, this.killCtx);
         }
       }
+    }
+    if (player.burnT && player.burnT > 0) player.burnT = Math.max(0, player.burnT - dt);
+    if (inPool && player.alive && poolDmg > 0) {
+      player.burnT = Math.max(player.burnT || 0, 0.55);
+      player.burnAcc = (player.burnAcc || 0) + poolDmg;
+      if (player.burnAcc >= 1) {
+        const tick = Math.floor(player.burnAcc);
+        player.burnAcc -= tick;
+        player.hp -= tick;
+        this.onFloatText?.(
+          player.x + rand(-8, 8),
+          player.y - 34,
+          String(tick),
+          '#ff8a3d',
+          13,
+          { life: 0.5, vy: -22 },
+        );
+        this.vfx?.sparks(player.x, player.y - 6, 3, '#ff8a3d');
+        if (player.hp <= 0) {
+          player.hp = 0;
+          player.alive = false;
+        }
+      }
+    } else if (!inPool) {
+      player.burnAcc = 0;
     }
     compactInPlace(this.pools, (p) => p.dead);
   }

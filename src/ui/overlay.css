@@ -314,7 +314,36 @@ body {
 }
 .fs-banish-left b { color: #ffb0b0; }
 
-/* banner */
+/* Red vignette when cabin / palisade takes a hit */
+.fs-camp-hurt {
+  position: fixed;
+  inset: 0;
+  z-index: 17;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(180, 12, 24, 0) 28%,
+    rgba(190, 16, 28, 0.42) 72%,
+    rgba(140, 0, 12, 0.72) 100%
+  );
+}
+.fs-camp-hurt.flash {
+  animation: fs-camp-hurt-flash 0.36s ease-out forwards;
+}
+@keyframes fs-camp-hurt-flash {
+  0% {
+    opacity: 0.95;
+  }
+  35% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* banner + event strip (shared top-center slot) */
 .fs-banner {
   position: fixed;
   top: 18%;
@@ -337,6 +366,42 @@ body {
   font-size: 1rem;
   font-weight: 800;
   color: rgba(255, 245, 220, 0.92);
+}
+.fs-event-hud {
+  position: fixed;
+  top: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 19;
+  text-align: center;
+  pointer-events: none;
+  padding: 0.55em 1.1em 0.65em;
+  border-radius: 0.7em;
+  background: rgba(22, 36, 28, 0.78);
+  border: 2px solid rgba(158, 240, 138, 0.45);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 0 24px rgba(109, 212, 106, 0.18);
+  min-width: min(280px, 70vw);
+}
+.fs-event-title {
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9ef08a;
+}
+.fs-event-sub {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: rgba(230, 255, 220, 0.88);
+}
+.fs-event-timer {
+  margin-top: 4px;
+  font-size: clamp(1.35rem, 3.2vw, 1.85rem);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: #ffe08a;
+  text-shadow: 0 2px 0 rgba(30, 20, 5, 0.8);
 }
 
 /* boss hud */
@@ -401,6 +466,14 @@ body {
   font-weight: 900;
 }
 .fs-buff span { opacity: 0.85; font-variant-numeric: tabular-nums; }
+.fs-buff.fs-debuff {
+  background: rgba(20, 36, 18, 0.88);
+  animation: fs-debuff-pulse 1.1s ease-in-out infinite;
+}
+@keyframes fs-debuff-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.18); }
+}
 
 .fs-gear-row {
   display: grid;
@@ -442,6 +515,21 @@ body {
   opacity: 0.95;
 }
 .fs-smith-refresh b { color: #ffe08a; }
+/* Cost-only pill — must not inherit .fs-btn.small's fixed square (clips labels). */
+.fs-smith-reroll {
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0.3em 0.65em;
+  font-size: 0.8125rem;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: visible;
+  word-break: normal;
+  overflow-wrap: normal;
+  border-radius: 0.45em;
+  flex-shrink: 0;
+}
 .fs-smith-reroll:disabled {
   filter: grayscale(0.55) brightness(0.8);
   cursor: default;
@@ -556,7 +644,17 @@ body {
 
 .fs-menu-shell.glossary-open {
   width: min(45rem, 96vw);
-  max-height: 94vh;
+  max-height: min(94dvh, 94vh);
+}
+
+/* Glossary: header/tabs stay put; only the entry list scrolls. */
+#menu-glossary.fs-menu-view {
+  overflow: hidden;
+}
+
+#menu-glossary .fs-menu-meta-head,
+#menu-glossary .fs-glossary-tabs {
+  flex: 0 0 auto;
 }
 
 .fs-menu-view {
@@ -866,15 +964,15 @@ body {
 .fs-glossary-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  margin: 4px 0 10px;
+  gap: 0.375em;
+  margin: 0.25em 0 0.625em;
 }
 
 .fs-glossary-tab {
   font: inherit;
   font-weight: 900;
   font-size: 0.8125rem;
-  padding: 8px 6px;
+  padding: 0.5em 0.375em;
   border-radius: 10px;
   border: 2px solid #5a4a2e;
   background: rgba(0, 0, 0, 0.28);
@@ -894,14 +992,19 @@ body {
 }
 
 .fs-glossary-list {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-right: 4px;
-  margin: 0 -2px;
+  align-items: stretch;
+  gap: 0.5em;
+  padding: 0 0.25em 0.5em 0;
+  margin: 0;
+  /* Avoid nested scroll fighting with the shell. */
+  -webkit-overflow-scrolling: touch;
 }
 
 .fs-glossary-list::-webkit-scrollbar {
@@ -914,17 +1017,49 @@ body {
 }
 
 .fs-glossary-section {
+  flex: 0 0 auto;
   font-size: 0.6875rem;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #ffe08a;
   opacity: 0.85;
-  margin: 6px 2px 2px;
+  margin: 0.4em 0.125em 0.125em;
+}
+
+.fs-glossary-ability-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+
+.fs-glossary-ability {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 220, 160, 0.12);
+}
+
+.fs-glossary-ability b {
+  color: var(--fs-gold, #ffd23f);
+  font-size: 0.92rem;
+}
+
+.fs-glossary-ability-desc {
+  flex: 1 1 100%;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  opacity: 0.88;
 }
 
 .fs-glossary-blurb {
-  margin: 0 2px 8px;
+  flex: 0 0 auto;
+  margin: 0 0.125em 0.5em;
   font-size: 0.8125rem;
   line-height: 1.4;
   opacity: 0.88;
@@ -934,20 +1069,25 @@ body {
 .fs-glossary-unique-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 6px 0 4px;
+  gap: 0.25em;
+  margin: 0.35em 0 0.25em;
 }
 
 .fs-glossary-card {
+  /* Never shrink below content — overflow:hidden was collapsing min-height in flex. */
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 2.75em minmax(0, 1fr);
+  align-items: start;
   gap: 0.65em;
   padding: 0.65em 0.7em;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.06);
   border: 2px solid rgba(255, 224, 138, 0.14);
-  overflow: hidden;
   min-width: 0;
+  min-height: min-content;
+  overflow: visible;
+  box-sizing: border-box;
 }
 
 .fs-glossary-card:hover {
@@ -964,6 +1104,7 @@ body {
   place-items: center;
   flex: none;
   overflow: hidden;
+  box-sizing: border-box;
 }
 .fs-glossary-icon svg {
   width: 1.75em;
@@ -972,34 +1113,38 @@ body {
 }
 
 .fs-glossary-swatch {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 1.75em;
+  height: 1.75em;
+  border-radius: 0.5em;
   border: 2px solid rgba(0, 0, 0, 0.45);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-sizing: border-box;
 }
 
 .fs-glossary-body {
   min-width: 0;
+  overflow: visible;
 }
 
 .fs-glossary-title {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 3px;
+  gap: 0.35em;
+  margin-bottom: 0.2em;
 }
 
 .fs-glossary-name {
   font-weight: 900;
   font-size: 0.875rem;
+  line-height: 1.25;
 }
 
 .fs-glossary-tag {
   font-size: 0.6563rem;
   font-weight: 800;
-  padding: 1px 6px;
+  line-height: 1.3;
+  padding: 0.1em 0.4em;
   border-radius: 6px;
   background: rgba(255, 224, 138, 0.16);
   color: #ffe08a;
@@ -1011,19 +1156,20 @@ body {
   font-size: 0.75rem;
   opacity: 0.72;
   line-height: 1.35;
-  margin-bottom: 5px;
+  margin-bottom: 0.3em;
 }
 
 .fs-glossary-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: 0.25em 0.375em;
 }
 
 .fs-glossary-stat {
   font-size: 0.6875rem;
   font-weight: 800;
-  padding: 2px 7px;
+  line-height: 1.3;
+  padding: 0.15em 0.45em;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.28);
   color: #e8dcc0;
@@ -2378,90 +2524,102 @@ body {
   color: #9ef08a;
 }
 
+/* Spotlight coach — dim world, cut out HUD target, card beside it. */
 .tutorial-overlay {
   z-index: 78;
-  padding: clamp(6px, 1.5vh, 14px);
+  display: block;
+  padding: 0;
   box-sizing: border-box;
-  /* Keep the modal inside the safe area on short / scaled displays. */
-  align-items: center;
-  justify-content: center;
+  background: transparent;
 }
-.fs-tutorial-modal {
-  /* Override .fs-modal max-height/overflow so we never grow a side scrollbar. */
-  width: min(28rem, 92vw);
-  min-width: 0;
-  max-width: 92vw;
-  max-height: min(92dvh, 92vh);
-  overflow: hidden;
+.tutorial-overlay .fs-coach-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 6, 4, 0.55);
+  pointer-events: none;
+}
+.tutorial-overlay.fs-coach-notarget .fs-coach-dim {
+  background: rgba(8, 6, 4, 0.72);
+}
+.fs-coach-hole {
+  position: fixed;
+  z-index: 1;
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 9999px rgba(8, 6, 4, 0.72),
+    0 0 0 3px #9ef08a,
+    0 0 22px rgba(158, 240, 138, 0.55);
+  pointer-events: none;
+  animation: fs-coach-pulse 1.4s ease-in-out infinite;
+}
+@keyframes fs-coach-pulse {
+  0%, 100% { box-shadow: 0 0 0 9999px rgba(8, 6, 4, 0.72), 0 0 0 3px #9ef08a, 0 0 18px rgba(158, 240, 138, 0.4); }
+  50% { box-shadow: 0 0 0 9999px rgba(8, 6, 4, 0.72), 0 0 0 3px #c8ffb0, 0 0 28px rgba(158, 240, 138, 0.7); }
+}
+.fs-coach-card {
+  position: fixed;
+  z-index: 2;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(70vh, 420px);
+  overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: clamp(0.3rem, 1.1vh, 0.7rem);
-  padding: clamp(0.7rem, 2vh, 1.25rem) clamp(0.85rem, 2.4vw, 1.45rem);
+  gap: 0.45rem;
+  padding: 0.85rem 1rem 0.95rem;
   text-align: left;
   box-sizing: border-box;
-  transform-origin: center center;
+  pointer-events: auto;
 }
-.fs-tutorial-modal h2 {
+.fs-coach-badge {
+  align-self: flex-start;
+  padding: 2px 8px;
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #9ef08a, #6dd46a);
+  color: #143018;
+}
+.fs-coach-card h2 {
   margin: 0;
-  flex: 0 0 auto;
-  font-size: clamp(1.05rem, 2.2vh + 0.45rem, 1.5rem);
+  font-size: 1.2rem;
   line-height: 1.2;
   color: #ffe08a;
-  text-align: center;
 }
 .fs-tutorial-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-  font-size: clamp(0.72rem, 1.2vh + 0.4rem, 0.92rem);
+  font-size: 0.84rem;
   line-height: 1.4;
   font-weight: 700;
   color: #f0e6d4;
   opacity: 0.95;
 }
 .fs-tutorial-body p {
-  margin: 0 0 clamp(0.3rem, 0.9vh, 0.65rem);
+  margin: 0 0 0.45rem;
 }
-.fs-tutorial-body ul {
-  margin: 0 0 clamp(0.3rem, 0.9vh, 0.65rem);
-  padding-left: 1.15em;
-}
-.fs-tutorial-body li {
-  margin: 0 0 clamp(0.18rem, 0.65vh, 0.38rem);
+.fs-tutorial-body p:last-child {
+  margin-bottom: 0;
 }
 .fs-tutorial-body b {
   color: #9ef08a;
   font-weight: 900;
 }
-.fs-tutorial-modal .fs-confirm-actions {
-  flex: 0 0 auto;
-  margin: 0;
+.fs-coach-card .fs-confirm-actions {
+  margin: 0.15rem 0 0;
   padding: 0;
   border: none;
-  gap: clamp(0.25rem, 0.8vh, 0.5rem);
 }
-.fs-tutorial-modal .fs-btn.big {
+.fs-coach-card .fs-btn.big {
   width: 100%;
   margin-top: 0;
-  padding: clamp(0.45em, 1.3vh, 0.7em) 1.2em;
-  font-size: clamp(1rem, 1.8vh + 0.4rem, 1.3rem);
+  padding: 0.55em 1.1em;
+  font-size: 1.05rem;
 }
-.fs-tutorial-modal .small {
-  flex: 0 0 auto;
+.fs-coach-card .small {
   margin: 0 !important;
   text-align: center;
   opacity: 0.7;
-  font-size: clamp(0.62rem, 1.15vh, 0.75rem) !important;
-}
-
-@media (max-height: 560px) {
-  .fs-tutorial-modal {
-    gap: 0.25rem;
-    padding: 0.55rem 0.8rem;
-  }
-  .fs-tutorial-body {
-    line-height: 1.32;
-  }
+  font-size: 0.7rem !important;
 }
 .fs-opt-actions {
   display: flex;
@@ -2502,7 +2660,8 @@ body {
   text-align: center;
 }
 
-#dom-ui .fs-upg-buy {
+#dom-ui .fs-upg-buy,
+#dom-ui .fs-smith-reroll {
   white-space: nowrap;
   overflow-wrap: normal;
   word-break: normal;

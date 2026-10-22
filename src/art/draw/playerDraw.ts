@@ -15,6 +15,12 @@ export type PlayerDrawState = {
   dashMax?: number;
   dashCd?: number;
   dashCdMax?: number;
+  /** Nature poison DoT — green wash so the player sees they're ticking. */
+  poisoned?: boolean;
+  /** Fire-pool burn DoT. */
+  burning?: boolean;
+  /** Darkness / breath slow. */
+  slowed?: boolean;
 };
 
 /** Legacy Player.draw — local origin at feet, facing +x (caller mirrors via facing). */
@@ -231,6 +237,57 @@ export function drawPlayer(ctx: Ctx, p: PlayerDrawState) {
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ellipse(ctx, 0, 1, 14, 5.5);
   ctx.fill();
+
+  // Status washes — drawn in local feet space (before facing restore).
+  if (p.alive && p.poisoned) {
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = '#6dd46a';
+    ellipse(ctx, 0, -22, 16, 22);
+    ctx.fill();
+    ctx.globalAlpha = 0.45;
+    ctx.strokeStyle = '#9ef08a';
+    ctx.lineWidth = 2;
+    ellipse(ctx, 0, -22, 17, 23);
+    ctx.stroke();
+    // Rising poison motes
+    ctx.globalAlpha = 0.7;
+    for (let i = 0; i < 4; i++) {
+      const ox = ((i * 7) % 13) - 6;
+      const oy = -12 - ((i * 5 + (p.walkTime || 0) * 18) % 28);
+      ellipse(ctx, ox, oy, 1.6, 2.2);
+      ctx.fillStyle = '#9ef08a';
+      ctx.fill();
+    }
+    ctx.restore();
+  } else if (p.alive && p.burning) {
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#ff8a3d';
+    ellipse(ctx, 0, -22, 16, 22);
+    ctx.fill();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = '#ffe066';
+    ctx.lineWidth = 2;
+    ellipse(ctx, 0, -22, 17, 23);
+    ctx.stroke();
+    ctx.globalAlpha = 0.75;
+    for (let i = 0; i < 4; i++) {
+      const ox = ((i * 7) % 13) - 6;
+      const oy = -10 - ((i * 5 + (p.walkTime || 0) * 22) % 26);
+      ellipse(ctx, ox, oy, 1.8, 2.4);
+      ctx.fillStyle = i % 2 ? '#ffe066' : '#ff6a3d';
+      ctx.fill();
+    }
+    ctx.restore();
+  } else if (p.alive && p.slowed) {
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = '#9b7bde';
+    ellipse(ctx, 0, -20, 15, 20);
+    ctx.fill();
+    ctx.restore();
+  }
 
   ctx.restore();
 

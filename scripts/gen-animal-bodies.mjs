@@ -77,13 +77,77 @@ code += convert(hitFlash)
     /const bodyOff = a\.sp\.bodyOff \|\| a\.bodyOff \|\| 10;\r?\n  const h = a\.height \|\| 32;\r?\n  const r = Math\.max\(10, a\.radius \|\| 14\);/,
     'const { bodyOff, h, r } = localBodyMetrics(a);',
   );
-code += convert(variantRim)
-  .replace(
-    /const bodyOff = a\.sp\.bodyOff \|\| a\.bodyOff \|\| 10;\r?\n  const h = a\.height \|\| 32;\r?\n  const r = Math\.max\(10, a\.radius \|\| 14\);/,
-    'const { bodyOff, h, r } = localBodyMetrics(a);',
-  );
-code += convert(demonic);
-code += convert(necro);
+// Variant overlays are sized to SPECIES metrics (legacy used a fixed boar layout).
+void variantRim;
+void demonic;
+void necro;
+code += `
+/** Outline hint for variants (local animal space — sized to each species). */
+export function drawVariantRim(ctx, a, vDef) {
+  const { bodyOff, h, r } = localBodyMetrics(a);
+  ctx.strokeStyle = vDef.rim;
+  ctx.lineWidth = Math.max(1.2, Math.min(2.4, r * 0.12));
+  ellipse(ctx, 2, -bodyOff - h * 0.18, r * 1.05, h * 0.36);
+  ctx.stroke();
+}
+
+/**
+ * Crimson back / shoulder spikes for demonic variants (local animal space).
+ * Normalized to body metrics so every species gets spikes on the back.
+ */
+export function drawDemonicSpikes(ctx, a) {
+  const { bodyOff, h, r } = localBodyMetrics(a);
+  const backY = -bodyOff - h * 0.12;
+  const span = Math.max(9, r * 0.95);
+  const rise = Math.max(7, h * 0.38);
+  const halfW = Math.max(1.2, r * 0.12);
+  const tipR = Math.max(0.7, r * 0.07);
+  const spikes = [
+    [-0.85, 0.12, -1.0, -0.72],
+    [-0.45, 0.02, -0.5, -0.92],
+    [0.0, -0.04, 0.05, -1.0],
+    [0.42, 0.02, 0.55, -0.88],
+    [0.82, 0.12, 1.0, -0.68],
+    [1.15, 0.28, 1.4, -0.32],
+  ];
+  ctx.lineJoin = 'round';
+  for (const [bxn, byn, txn, tyn] of spikes) {
+    const bx = bxn * span;
+    const by = backY + byn * rise * 0.2;
+    const tx = txn * span;
+    const ty = backY + tyn * rise;
+    ctx.beginPath();
+    ctx.moveTo(bx - halfW, by);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(bx + halfW, by);
+    ctx.closePath();
+    ctx.fillStyle = '#5a0a0a';
+    ctx.fill();
+    ctx.strokeStyle = '#1a0000';
+    ctx.lineWidth = Math.max(0.8, r * 0.06);
+    ctx.stroke();
+    ctx.fillStyle = '#ff3a2a';
+    ellipse(ctx, tx, ty, tipR, tipR);
+    ctx.fill();
+  }
+}
+
+/** Hollow green eyes for necromantic / undead variants (scaled to species). */
+export function drawNecroEyes(ctx, a) {
+  const e = a.sp.eye || [16, -16];
+  const { r } = localBodyMetrics(a);
+  const er = Math.max(2.2, Math.min(3.6, r * 0.22));
+  ctx.fillStyle = 'rgba(40, 80, 50, 0.55)';
+  ellipse(ctx, e[0], e[1], er, er * 0.88);
+  ctx.fill();
+  ctx.fillStyle = '#7dffb0';
+  ellipse(ctx, e[0], e[1], er * 0.5, er * 0.44);
+  ctx.fill();
+  ctx.fillStyle = '#0a1a10';
+  ellipse(ctx, e[0] + er * 0.1, e[1], er * 0.22, er * 0.28);
+  ctx.fill();
+}
+`;
 code += convert(mark);
 // Strip duplicate legs() if present in bodies chunk (legacy defines it just before drawBoar).
 const bodiesClean = bodies.replace(/\r?\nfunction legs\([^)]*\)\s*\{[\s\S]*?\r?\n\}\r?\n(?=\r?\nfunction drawBoar)/, '\n');

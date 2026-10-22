@@ -28,9 +28,11 @@ export class AssaultSystem {
     threatHp: number,
     isNight: boolean,
     raidActive: boolean,
+    /** Start-of-run calm — no daytime assault waves until it ends. */
+    graceLeft: number,
     onBanner: (title: string, sub: string, color: string) => void,
   ) {
-    if (isNight || raidActive) {
+    if (isNight || raidActive || graceLeft > 0) {
       this.queue.length = 0;
       this.timer = Math.max(this.timer, 22);
       return;

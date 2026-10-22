@@ -1,7 +1,9 @@
+import { COACH_IDS } from '../data/tutorials';
+
 const SETTINGS_STORAGE_KEY = 'forestSurvivor_settings_v1';
 
-export const TUTORIAL_IDS = ['enemy', 'build', 'smith', 'firstNight'] as const;
-export type TutorialId = typeof TUTORIAL_IDS[number];
+export const TUTORIAL_IDS = COACH_IDS;
+export type TutorialId = (typeof TUTORIAL_IDS)[number];
 
 export type DisplayMode = 'windowed' | 'borderless' | 'fullscreen';
 
@@ -151,16 +153,15 @@ class SettingsManager implements SettingsData {
     });
   }
 
+  /** True when coach tips are On (each run re-shows them; per-run dedupe is in RunScene). */
   shouldShowTutorial(id: string) {
     if (!this.tutorialsEnabled) return false;
-    if (!(TUTORIAL_IDS as readonly string[]).includes(id)) return false;
-    return !this.tutorialsSeen[id];
+    return (TUTORIAL_IDS as readonly string[]).includes(id);
   }
 
-  markTutorialSeen(id: string) {
-    if (!(TUTORIAL_IDS as readonly string[]).includes(id)) return;
-    this.tutorialsSeen[id] = true;
-    this.save();
+  /** Legacy no-op for save shape; progress is no longer persisted across runs. */
+  markTutorialSeen(_id: string) {
+    /* intentionally empty — tips replay every run while enabled */
   }
 
   applyAccessibility() {

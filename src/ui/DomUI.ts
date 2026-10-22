@@ -10,11 +10,19 @@ import {
   ELEMENT_IDS,
   computeStats,
   upgradeCost,
+  START_GRACE,
+  STAR_MAX,
+  STAR_TIER_SIZE,
+  STAR_HP,
+  STAR_DMG,
+  STAR_SPEED,
+  STAR_XP,
+  STAR_LOOT,
 } from '../data/constants';
 import { ITEM_SLOTS, SLOT_LABELS, type GearItem } from '../data/shop';
 import { WEAPON_DEFS, UNIQUE_NAMES, uniqueWeaponName } from '../data/weapons';
 import { PASSIVE_DEFS, BONUS_DEFS, ELEMENT_PASSIVES, type LevelUpCard } from '../data/passives';
-import { SPECIES, AGGRO_RANGE_MULT, BOSS_NAMES, ANIMAL_VARIANTS } from '../data/animals';
+import { SPECIES, AGGRO_RANGE_MULT, BOSS_NAMES, ANIMAL_VARIANTS, VARIANT_IDS } from '../data/animals';
 import { META_UPGRADES, meta as metaProgress, type MetaProgress, type MetaUpgradeId } from '../meta/Meta';
 import { settings, type DisplayMode } from '../meta/Settings';
 import { Audio } from '../audio/Audio';
@@ -23,55 +31,16 @@ import type { RunPlayer } from '../run/RunTypes';
 import type { CampSystem } from '../systems/CampSystem';
 import type { DayNightSystem } from '../systems/DayNightSystem';
 import type { ArsenalSystem } from '../systems/ArsenalSystem';
+import {
+  BOSS_ABILITY,
+  ELEMENT_ABILITY_POOLS,
+  type BossAbilityId,
+} from '../systems/EnemyAbilities';
+import { COACH_STEPS } from '../data/tutorials';
 import type { UpdateInfo } from '../types/global';
 
 const RES_ORDER = ['wood', 'meat', 'gold'] as const;
 
-/** Legacy TUTORIAL_CONTENT — first-run teaching popups. */
-const TUTORIAL_CONTENT: Record<string, { title: string; body: string }> = {
-  enemy: {
-    title: 'Know your beasts',
-    body:
-      '<p>When you meet a threat, look for these markings:</p>' +
-      '<ul>' +
-      '<li><b>Veterancy stars</b> — bronze (1–5), then silver (1–5), then gold (1–5). Higher tiers mean tougher fights and better loot.</li>' +
-      '<li><b>Variants</b> — <b>Dire</b> (darker brutes), <b>Necromantic</b> (split into 3 lesser copies on death), <b>Demonic</b> (leave a fire pool on death).</li>' +
-      '<li><b>Elements</b> — colored beasts lean on fire, water, nature, earth, light, or darkness. Matching your weapon element helps; theirs can resist yours.</li>' +
-      '<li><b>Melee</b> — most animals charge and lunge up close.</li>' +
-      '<li><b>Ranged</b> — sheep hurl wool, raccoons fling rocks, and beavers throw logs while keeping their distance.</li>' +
-      '</ul>',
-  },
-  build: {
-    title: 'Defend the camp',
-    body:
-      '<p>You have enough resources to fortify. Open the camp panel (<b>U</b>) while at camp to build.</p>' +
-      '<ul>' +
-      '<li><b>Palisades</b> stop raiders from walking straight into the cabin.</li>' +
-      '<li><b>Watchtowers</b> shoot threats automatically — essential for nights.</li>' +
-      '</ul>' +
-      '<p>If the <b>camp is destroyed, the run is over</b> — keep it standing.</p>',
-  },
-  smith: {
-    title: 'Blacksmith shop',
-    body:
-      '<p>The forge is open. Return to camp and open the <b>Smith</b> tab to buy gear.</p>' +
-      '<ul>' +
-      '<li>Every item fills a <b>unique equipment slot</b> (weapon, armor, rings…).</li>' +
-      '<li>Buying for a slot that already has an item <b>replaces it</b> — the old item is lost.</li>' +
-      '<li>Hover a shop item to <b>compare</b> it with what you already wear.</li>' +
-      '</ul>',
-  },
-  firstNight: {
-    title: 'Night raid incoming',
-    body:
-      '<p>Dusk is falling — <b>get back to camp</b> and prepare the walls.</p>' +
-      '<ul>' +
-      '<li>Each night a <b>miniboss</b> leads the raid.</li>' +
-      '<li>Every <b>3rd night</b> a <b>true boss</b> arrives instead — much deadlier.</li>' +
-      '<li>Raiders march on the camp from the forest edge. Hold the line or lose the run.</li>' +
-      '</ul>',
-  },
-};
 const ELEMENT_ICON: Record<string, string> = {
   fire: 'ember',
   water: 'tide',
@@ -106,13 +75,20 @@ export class DomUI {
   tutorialEl: HTMLElement;
   loadoutEl: HTMLElement;
   onTutorialDismiss?: () => void;
+  /** World-space coach targets (e.g. player dash bar) as viewport CSS pixels. */
+  onCoachWorldRect?: (key: string) => { x: number; y: number; w: number; h: number } | null;
   /** Legacy #gearHud — bottom-left equipment slot strip. */
   gearHudEl: HTMLElement;
   optionsEl: HTMLElement;
   tipPopEl: HTMLElement;
   bannerEl: HTMLElement;
+  /** Top-center event strip (grace timer, etc.) — same slot as banners. */
+  eventHudEl: HTMLElement;
+  /** Full-screen red flash when camp / palisade is hit. */
+  campHurtEl: HTMLElement;
   bossHudEl: HTMLElement;
   buffHudEl: HTMLElement;
+  private campHurtTimer: ReturnType<typeof setTimeout> | null = null;
   private lastGearHudKey = '';
   private campSmithTab = false;
   private campPanelOpen = true;
@@ -153,14 +129,15 @@ export class DomUI {
   };
   private tipArsenal: ArsenalSystem | null = null;
   private tipPlayer: RunPlayer | null = null;
-  private glossaryTab: 'beasts' | 'cards' | 'buildings' = 'beasts';
+  private glossaryTab: 'beasts' | 'cards' | 'buildings' | 'world' = 'beasts';
   private menuMuted = false;
   private menuView: 'home' | 'meta' | 'glossary' = 'home';
   private menuMetaRef: MetaProgress = metaProgress;
   private confirmAction: (() => void) | null = null;
   private tutorialFitBound = false;
+  private coachTargetKey: string | null = null;
   private onTutorialResize = () => {
-    if (this.isTutorialOpen()) this.fitTutorialModal();
+    if (this.isTutorialOpen()) this.layoutCoach();
   };
 
   onCardPick?: (card: LevelUpCard) => void;
@@ -197,11 +174,15 @@ export class DomUI {
     this.confirmEl = this.mk('div', 'fs-overlay confirm-overlay hidden interactive');
     this.tutorialEl = this.mk('div', 'fs-overlay tutorial-overlay hidden interactive');
     this.tipEl = this.mk('div', 'fs-tip');
+    this.tipEl.setAttribute('data-coach', 'controls');
     this.loadoutEl = this.mk('div', 'fs-loadout interactive');
+    this.loadoutEl.setAttribute('data-coach', 'loadout');
     this.gearHudEl = this.mk('div', 'fs-gear-hud interactive');
     this.tipPopEl = this.mk('div', 'fs-tip-pop hidden');
     this.optionsEl = this.mk('div', 'fs-overlay options-overlay hidden interactive');
     this.bannerEl = this.mk('div', 'fs-banner hidden');
+    this.eventHudEl = this.mk('div', 'fs-event-hud hidden');
+    this.campHurtEl = this.mk('div', 'fs-camp-hurt');
     this.bossHudEl = this.mk('div', 'fs-boss-hud hidden');
     this.buffHudEl = this.mk('div', 'fs-buff-hud');
     root.append(
@@ -212,6 +193,8 @@ export class DomUI {
       this.tipPopEl,
       this.campPanelEl,
       this.bannerEl,
+      this.eventHudEl,
+      this.campHurtEl,
       this.bossHudEl,
       this.pauseEl,
       this.cardsEl,
@@ -248,9 +231,9 @@ export class DomUI {
   private buildHud() {
     this.hudEl.innerHTML = `
       <div class="fs-hud-left">
-        <div class="fs-panel fs-status">
-          <div class="fs-level-badge" id="hud-lvl" title="Player level">1</div>
-          <div class="fs-status-bars">
+        <div class="fs-panel fs-status" data-coach="status">
+          <div class="fs-level-badge" id="hud-lvl" title="Player level" data-coach="xp">1</div>
+          <div class="fs-status-bars" data-coach="xp">
             <div class="fs-bar-row">
               <span class="fs-ico" title="Health">${ICONS.heart}</span>
               <div class="fs-track" id="hud-hp-bar"><span style="width:100%"></span><em id="hud-hp-text">100/100</em></div>
@@ -263,16 +246,16 @@ export class DomUI {
           </div>
         </div>
       </div>
-      <div class="fs-panel fs-resources">
+      <div class="fs-panel fs-resources" data-coach="resources">
         <div class="fs-res" title="Wood"><span class="fs-ico">${ICONS.wood}</span><strong id="hud-wood">0</strong></div>
         <div class="fs-res" title="Meat"><span class="fs-ico">${ICONS.meat}</span><strong id="hud-meat">0</strong></div>
         <div class="fs-res" title="Gold"><span class="fs-ico">${ICONS.gold}</span><strong id="hud-gold">0</strong></div>
       </div>
-      <div class="fs-panel fs-time" title="Day / night cycle">
+      <div class="fs-panel fs-time" title="Day / night cycle" data-coach="time">
         <div class="fs-clock-top">
           <span class="fs-ico fs-clock-ico" id="hud-phase-ico">${ICONS.sun}</span>
           <b id="hud-day">Day 1</b>
-          <span id="hud-threat">Threat x1.0</span>
+          <span id="hud-threat" data-coach="threat">Threat x1.0</span>
         </div>
         <div class="fs-daybar"><span id="hud-dayfill" style="width:20%"></span></div>
         <div class="fs-clock-sub" id="hud-clock">05:00 · Day</div>
@@ -283,7 +266,7 @@ export class DomUI {
         <span id="hud-fps">60</span> FPS
       </div>
       <div class="fs-panel fs-hud-btns interactive">
-        <button type="button" class="fs-btn icon" id="btn-camp-toggle" title="Camp upgrades (U / B)">${ICONS.up}</button>
+        <button type="button" class="fs-btn icon" id="btn-camp-toggle" data-coach="campBtn" title="Camp upgrades (U / B)">${ICONS.up}</button>
         <button type="button" class="fs-btn icon" id="btn-pause" title="Pause (P / Esc)">${ICONS.pause}</button>
         <button type="button" class="fs-btn icon" id="btn-restart" title="Restart run">${ICONS.restart}</button>
         <button type="button" class="fs-btn icon" id="btn-mute" title="Mute (M)">${ICONS.sound}</button>
@@ -308,11 +291,30 @@ export class DomUI {
       <div class="fs-banner-title" id="banner-title"></div>
       <div class="fs-banner-sub" id="banner-sub"></div>
     `;
+    this.eventHudEl.innerHTML = `
+      <div class="fs-event-title" id="event-title">Grace</div>
+      <div class="fs-event-sub" id="event-sub">Wildlife is peaceful</div>
+      <div class="fs-event-timer" id="event-timer">0:30</div>
+    `;
   }
 
   refreshMuteBtn() {
     const btn = this.hudEl.querySelector('#btn-mute');
     if (btn) btn.innerHTML = Audio.muted ? ICONS.mute : ICONS.sound;
+  }
+
+  /** Red edge vignette when the cabin or a palisade takes a hit. */
+  flashCampHurt() {
+    const el = this.campHurtEl;
+    el.classList.remove('flash');
+    // Restart CSS animation.
+    void el.offsetWidth;
+    el.classList.add('flash');
+    if (this.campHurtTimer) clearTimeout(this.campHurtTimer);
+    this.campHurtTimer = setTimeout(() => {
+      el.classList.remove('flash');
+      this.campHurtTimer = null;
+    }, 380);
   }
 
   /** Legacy-style center banner (day / raid / assault announcements). */
@@ -329,7 +331,34 @@ export class DomUI {
     this.bannerTimer = setTimeout(() => this.bannerEl.classList.add('hidden'), 4200);
   }
 
-  updateBossHud(boss: { name: string; hp: number; maxHp: number; sub?: string } | null) {
+  /** Top-center event strip — start grace countdown (same slot as banners). */
+  updateEventHud(graceLeft: number) {
+    if (graceLeft > 0.05) {
+      const secs = Math.ceil(graceLeft);
+      const mm = Math.floor(secs / 60);
+      const ss = secs % 60;
+      const title = this.eventHudEl.querySelector('#event-title');
+      const sub = this.eventHudEl.querySelector('#event-sub');
+      const timer = this.eventHudEl.querySelector('#event-timer');
+      if (title) title.textContent = 'Grace';
+      if (sub) sub.textContent = 'Wildlife ignores you and the camp — until you strike';
+      if (timer) timer.textContent = `${mm}:${String(ss).padStart(2, '0')}`;
+      this.eventHudEl.classList.remove('hidden');
+    } else {
+      this.eventHudEl.classList.add('hidden');
+    }
+  }
+
+  updateBossHud(
+    boss: {
+      name: string;
+      hp: number;
+      maxHp: number;
+      element?: string | null;
+      bossMoves?: BossAbilityId[];
+      sub?: string;
+    } | null,
+  ) {
     if (!boss || boss.hp <= 0) {
       this.bossHudEl.classList.add('hidden');
       return;
@@ -340,7 +369,26 @@ export class DomUI {
     const sub = this.bossHudEl.querySelector('#boss-sub');
     if (name) name.textContent = boss.name;
     if (fill) fill.style.width = `${Math.max(0, Math.min(1, boss.hp / boss.maxHp)) * 100}%`;
-    if (sub) sub.textContent = boss.sub || `${Math.ceil(boss.hp)} / ${Math.ceil(boss.maxHp)}`;
+    if (sub) {
+      if (boss.sub != null) {
+        sub.textContent = boss.sub;
+      } else {
+        // Legacy: element + rolled boss modifiers under the HP bar.
+        const bits: string[] = [];
+        if (boss.element && ELEMENTS[boss.element]) bits.push(ELEMENTS[boss.element].name);
+        if (boss.bossMoves?.length) {
+          bits.push(
+            boss.bossMoves
+              .map((id) => BOSS_ABILITY[id]?.name || id)
+              .filter(Boolean)
+              .join(' · '),
+          );
+        }
+        sub.textContent = bits.length
+          ? bits.join('  —  ')
+          : `${Math.ceil(boss.hp)} / ${Math.ceil(boss.maxHp)}`;
+      }
+    }
   }
 
   updateBuffHud(player: RunPlayer) {
@@ -356,6 +404,28 @@ export class DomUI {
     push('fury', player.buffFury);
     push('vital', player.buffVital);
     push('haste', player.buffHaste);
+    push('hearts', player.buffHearts);
+    // Debuff chips so poison / slow are obvious while ticking.
+    if (player.poisons.length) {
+      let maxLife = 0;
+      for (const b of player.poisons) maxLife = Math.max(maxLife, b.life);
+      bits.push(
+        `<div class="fs-buff fs-debuff" style="border-color:#6dd46a" title="Poisoned — taking damage over time">` +
+          `<b style="color:#6dd46a">Poison</b><span>${Math.ceil(maxLife)}s</span></div>`,
+      );
+    }
+    if ((player.burnT || 0) > 0) {
+      bits.push(
+        `<div class="fs-buff fs-debuff" style="border-color:#ff8a3d" title="Burning — standing in a damage pool">` +
+          `<b style="color:#ff8a3d">Burn</b><span>!</span></div>`,
+      );
+    }
+    if (player.slowT > 0 && player.slow > 0.05) {
+      bits.push(
+        `<div class="fs-buff fs-debuff" style="border-color:#9b7bde" title="Slowed">` +
+          `<b style="color:#9b7bde">Slow</b><span>${Math.ceil(player.slowT)}s</span></div>`,
+      );
+    }
     const key = bits.join('|');
     if (key === this.lastBuffKey) return;
     this.lastBuffKey = key;
@@ -370,8 +440,8 @@ export class DomUI {
       </header>
       <div id="camp-side-note" class="fs-camp-note">Return to camp to build / buy</div>
       <div class="fs-camp-tabs">
-        <button type="button" class="fs-camp-tab active" id="camp-tab-build">Build</button>
-        <button type="button" class="fs-camp-tab" id="camp-tab-smith">Smith</button>
+        <button type="button" class="fs-camp-tab active" id="camp-tab-build" data-coach="buildTab">Build</button>
+        <button type="button" class="fs-camp-tab" id="camp-tab-smith" data-coach="smithTab">Smith</button>
       </div>
       <div id="camp-side-list" class="fs-camp-side-list"></div>
       <div id="camp-side-smith" class="fs-camp-side-smith hidden"></div>
@@ -561,9 +631,9 @@ export class DomUI {
       <div class="fs-gear-row">${gearBits}</div>
       <div class="fs-smith-refresh">
         <span>Stock refreshes in <b>${mm}:${String(ss).padStart(2, '0')}</b></span>
-        <button type="button" class="fs-btn small fs-smith-reroll" id="btn-smith-reroll" ${canReroll ? '' : 'disabled'}
+        <button type="button" class="fs-btn fs-smith-reroll" id="btn-smith-reroll" ${canReroll ? '' : 'disabled'}
           title="${!atCamp ? 'Return to camp to reroll' : canReroll ? `Reroll forge stock for ${rerollCost} gold (cost rises each time)` : `Need ${rerollCost} gold to reroll`}">
-          Reroll ${rerollCost}g
+          ${rerollCost}g
         </button>
       </div>
       <div class="fs-shop-list">${rows.join('')}</div>`;
@@ -804,6 +874,7 @@ export class DomUI {
             <button type="button" class="fs-glossary-tab active" data-glossary="beasts">Beasts</button>
             <button type="button" class="fs-glossary-tab" data-glossary="cards">Cards</button>
             <button type="button" class="fs-glossary-tab" data-glossary="buildings">Buildings</button>
+            <button type="button" class="fs-glossary-tab" data-glossary="world">World</button>
           </div>
           <div id="glossary-list" class="fs-glossary-list"></div>
         </div>
@@ -839,7 +910,13 @@ export class DomUI {
     this.menuEl.querySelectorAll('.fs-glossary-tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         Audio.playSfx('click');
-        this.setGlossaryTab(((tab as HTMLElement).dataset.glossary || 'beasts') as typeof this.glossaryTab);
+        this.setGlossaryTab(
+          ((tab as HTMLElement).dataset.glossary || 'beasts') as
+            | 'beasts'
+            | 'cards'
+            | 'buildings'
+            | 'world',
+        );
       });
     });
     this.menuEl.querySelector('#btn-options')?.addEventListener('click', () => {
@@ -1006,15 +1083,18 @@ export class DomUI {
     title?: string;
     message?: string;
     confirmLabel?: string;
+    cancelLabel?: string;
     onConfirm?: () => void;
   }) {
     this.confirmAction = opts.onConfirm || null;
     const title = this.confirmEl.querySelector('#confirm-title');
     const msg = this.confirmEl.querySelector('#confirm-message');
     const yes = this.confirmEl.querySelector('#btn-confirm-yes') as HTMLButtonElement | null;
+    const no = this.confirmEl.querySelector('#btn-confirm-no') as HTMLButtonElement | null;
     if (title) title.textContent = opts.title || 'Are you sure?';
     if (msg) msg.textContent = opts.message || '';
     if (yes) yes.textContent = opts.confirmLabel || 'Yes';
+    if (no) no.textContent = opts.cancelLabel || 'Cancel';
     this.confirmEl.classList.remove('hidden');
     Audio.playSfx('click');
   }
@@ -1030,7 +1110,7 @@ export class DomUI {
     this.confirmEl.classList.add('hidden');
   }
 
-  setGlossaryTab(tab: 'beasts' | 'cards' | 'buildings') {
+  setGlossaryTab(tab: 'beasts' | 'cards' | 'buildings' | 'world') {
     this.glossaryTab = tab || 'beasts';
     this.menuEl.querySelectorAll('.fs-glossary-tab').forEach((el) => {
       el.classList.toggle('active', (el as HTMLElement).dataset.glossary === this.glossaryTab);
@@ -1232,6 +1312,135 @@ export class DomUI {
       </div>`;
   }
 
+  private glossaryVariantCard(id: string) {
+    const v = ANIMAL_VARIANTS[id as keyof typeof ANIMAL_VARIANTS];
+    if (!v) return '';
+    const special =
+      id === 'dire'
+        ? 'Darker and bulkier. Pure stat boost — no death gimmick.'
+        : id === 'necromantic'
+          ? 'Undead tint. On death, splits into 3 weaker fragments with reduced loot.'
+          : id === 'demonic'
+            ? 'Crimson spiked look. On death, leaves a large fire pool that burns you.'
+            : 'Standard forest wildlife — baseline stats.';
+    return `
+      <div class="fs-glossary-card">
+        <div class="fs-glossary-icon">${this.glossarySwatch(v.bar || '#8a7a60')}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">${v.name}</span>
+            <span class="fs-glossary-tag">Variant</span>
+          </div>
+          <div class="fs-glossary-desc">${special}</div>
+          <div class="fs-glossary-stats">
+            ${this.glossaryStat('HP', `×${v.hp}`)}
+            ${this.glossaryStat('Dmg', `×${v.dmg}`)}
+            ${this.glossaryStat('Speed', `×${v.speed}`)}
+            ${this.glossaryStat('XP', `×${v.xp}`)}
+            ${this.glossaryStat('Loot', `×${v.loot}`)}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  private glossaryElementCard(el: string) {
+    const def = ELEMENTS[el];
+    if (!def) return '';
+    const opp = ELEMENTS[def.opposite];
+    const pool = ELEMENT_ABILITY_POOLS[el as keyof typeof ELEMENT_ABILITY_POOLS] || [];
+    const moves = pool
+      .map(
+        (ab, i) =>
+          `<div class="fs-glossary-ability">
+            <b>${ab.name}</b>
+            <span class="fs-glossary-tag">${i === 0 ? 'Core' : `★ unlock`}</span>
+            <span class="fs-glossary-ability-desc">${ab.desc}</span>
+            <span class="fs-glossary-stats">
+              ${this.glossaryStat('CD', `${ab.cd}s`)}
+              ${this.glossaryStat('Range', ab.range)}
+            </span>
+          </div>`,
+      )
+      .join('');
+    return `
+      <div class="fs-glossary-card">
+        <div class="fs-glossary-icon">${this.glossarySwatch(def.color)}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">${def.name}</span>
+            <span class="fs-glossary-tag">Element</span>
+          </div>
+          <div class="fs-glossary-desc">
+            Colored orb over the beast. Strong vs <b>${opp?.name || def.opposite}</b> (×1.55),
+            resists its own element (×0.65). Elemental beasts telegraph special moves before striking.
+          </div>
+          <div class="fs-glossary-stats">
+            ${this.glossaryStat('Opposite', opp?.name || def.opposite)}
+            ${this.glossaryStat('Moves', pool.length)}
+          </div>
+          <div class="fs-glossary-ability-list">${moves}</div>
+        </div>
+      </div>`;
+  }
+
+  private glossaryBossAbilityCard(id: BossAbilityId) {
+    const def = BOSS_ABILITY[id];
+    if (!def) return '';
+    return `
+      <div class="fs-glossary-card">
+        <div class="fs-glossary-icon">${this.glossarySwatch(def.color)}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">${def.name}</span>
+            <span class="fs-glossary-tag">Boss move</span>
+          </div>
+          <div class="fs-glossary-desc">${def.desc}</div>
+          <div class="fs-glossary-stats">
+            ${this.glossaryStat('CD', `${def.cd}s`)}
+            ${this.glossaryStat('Tele', `${def.tele}s`)}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  private glossaryInfusionCard(el: string) {
+    const inf = ELEMENT_INFUSE[el as keyof typeof ELEMENT_INFUSE];
+    const def = ELEMENTS[el];
+    if (!inf || !def) return '';
+    return `
+      <div class="fs-glossary-card">
+        <div class="fs-glossary-icon">${this.glossaryIcon(ELEMENT_ICON[el] || el, el)}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">${inf.name}</span>
+            <span class="fs-glossary-tag" style="border-color:${def.color};color:${def.color}">${def.name}</span>
+          </div>
+          <div class="fs-glossary-desc">${inf.effect} Applied when you infuse a maxed weapon with this element, unlocking its unique form.</div>
+        </div>
+      </div>`;
+  }
+
+  private glossarySimpleCard(opts: {
+    name: string;
+    tag: string;
+    desc: string;
+    color?: string;
+    stats?: string;
+  }) {
+    return `
+      <div class="fs-glossary-card">
+        <div class="fs-glossary-icon">${this.glossarySwatch(opts.color || '#8a7a60')}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">${opts.name}</span>
+            <span class="fs-glossary-tag">${opts.tag}</span>
+          </div>
+          <div class="fs-glossary-desc">${opts.desc}</div>
+          ${opts.stats ? `<div class="fs-glossary-stats">${opts.stats}</div>` : ''}
+        </div>
+      </div>`;
+  }
+
   renderGlossary() {
     const list = this.menuEl.querySelector('#glossary-list');
     const countEl = this.menuEl.querySelector('#glossary-count');
@@ -1240,24 +1449,55 @@ export class DomUI {
     let count = 0;
     if (this.glossaryTab === 'beasts') {
       const ids = Object.keys(SPECIES);
-      count = ids.length;
-      const variantBlurb = ANIMAL_VARIANTS
-        ? `<div class="fs-glossary-section">Variants</div>
-           <p class="fs-glossary-blurb">Any beast can spawn as <b>Basic</b>, <b>Dire</b> (darker, tougher),
-           <b>Necromantic</b> (undead — splits into 3 lesser copies on death), or <b>Demonic</b>
-           (crimson with spikes — leaves a large fire pool on death).
-           Variants stack with veterancy (bronze → silver → gold stars) and elements.</p>`
-        : '';
-      html = variantBlurb + ids.map((id) => this.glossaryBeastCard(id)).join('');
+      const variants = VARIANT_IDS.map((id) => this.glossaryVariantCard(id)).join('');
+      const elements = ELEMENT_IDS.map((el) => this.glossaryElementCard(el)).join('');
+      const bossMoves = (Object.keys(BOSS_ABILITY) as BossAbilityId[])
+        .map((id) => this.glossaryBossAbilityCard(id))
+        .join('');
+      const pct = (n: number) => `${Math.round(n * 100)}%`;
+      count =
+        ids.length +
+        VARIANT_IDS.length +
+        ELEMENT_IDS.length +
+        Object.keys(BOSS_ABILITY).length;
+      html =
+        `<div class="fs-glossary-section">Variants</div>
+         <p class="fs-glossary-blurb">Any beast can roll a variant. Multipliers stack with
+         <b>veterancy stars</b> and <b>elements</b>. Look for the colored rim under their feet.</p>` +
+        variants +
+        `<div class="fs-glossary-section">Veterancy</div>
+         <p class="fs-glossary-blurb">Stars above a beast mark veterancy (up to ${STAR_MAX}).
+         Bronze (1–${STAR_TIER_SIZE}), silver (${STAR_TIER_SIZE + 1}–${STAR_TIER_SIZE * 2}),
+         then gold. Each star raises HP (+${pct(STAR_HP)}), damage (+${pct(STAR_DMG)}),
+         speed (+${pct(STAR_SPEED)}), XP (+${pct(STAR_XP)}), and loot (+${pct(STAR_LOOT)}).
+         Higher stars also unlock <b>more elemental abilities</b>:
+         0–2★ → 1 move · 3–6★ → 2 · 7–11★ → 3 · 12+★ → full pool (bosses +1).</p>` +
+        `<div class="fs-glossary-section">Elements &amp; abilities</div>
+         <p class="fs-glossary-blurb">Colored orbs mark elemental affinity. Elemental beasts
+         telegraph specials before they hit. The first listed move is always available;
+         extras unlock with stars.</p>` +
+        elements +
+        `<div class="fs-glossary-section">True-boss moves</div>
+         <p class="fs-glossary-blurb">Every 3rd night a true boss leads the raid with two random
+         signature moves from this pool of ten (shown on the boss HUD). Minibosses and day champions
+         use elemental pools instead.</p>` +
+        bossMoves +
+        `<div class="fs-glossary-section">Species</div>` +
+        ids.map((id) => this.glossaryBeastCard(id)).join('');
     } else if (this.glossaryTab === 'cards') {
       const weapons = Object.keys(WEAPON_DEFS);
       const passives = Object.keys(PASSIVE_DEFS);
       const bonuses = Object.keys(BONUS_DEFS);
       const powerups = Object.keys(POWERUPS);
-      count = weapons.length + passives.length + bonuses.length + powerups.length;
+      const infusions = ELEMENT_IDS.length;
+      count = weapons.length + passives.length + bonuses.length + powerups.length + infusions;
       html =
         `<div class="fs-glossary-section">Weapons</div>` +
         weapons.map((id) => this.glossaryWeaponCard(id)).join('') +
+        `<div class="fs-glossary-section">Element infusions</div>
+         <p class="fs-glossary-blurb">Max a weapon, then take its infusion card to awaken a unique form.
+         Infusion effects scale with your damage.</p>` +
+        ELEMENT_IDS.map((el) => this.glossaryInfusionCard(el)).join('') +
         `<div class="fs-glossary-section">Passives</div>` +
         passives.map((id) => this.glossaryPassiveCard(id)).join('') +
         (bonuses.length
@@ -1265,12 +1505,82 @@ export class DomUI {
             bonuses.map((id) => this.glossaryBonusCard(id)).join('')
           : '') +
         (powerups.length
-          ? `<div class="fs-glossary-section">Power-ups</div>` +
+          ? `<div class="fs-glossary-section">Power-ups</div>
+             <p class="fs-glossary-blurb">Rare drops from slain beasts. Instant effects fire once;
+             timed charms last for their duration. <b>Crimson Charm</b> makes kills drop hearts
+             that heal 10% max HP. <b>Cataclysm</b> clears the forest (bosses endure) and pulls loot in.</p>` +
             powerups.map((id) => this.glossaryPowerupCard(id)).join('')
           : '');
+    } else if (this.glossaryTab === 'world') {
+      const worldCards = [
+        this.glossarySimpleCard({
+          name: 'Opening grace',
+          tag: `${START_GRACE}s`,
+          color: '#9ef08a',
+          desc: `At run start, wildlife ignores you and the camp for ${START_GRACE}s unless you strike first (provoked beasts fight back). Daytime assault waves and boss spawns are held until grace ends.`,
+          stats: this.glossaryStat('Duration', `${START_GRACE}s`),
+        }),
+        this.glossarySimpleCard({
+          name: 'Day / night cycle',
+          tag: 'Time',
+          color: '#ffe08a',
+          desc: 'Days stretch into dusk, then night. At dusk, raid fronts gather — get back to camp. Night brings raiders; dawn repairs the cabin and palisades if you survive.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Night raids',
+          tag: 'Siege',
+          color: '#ff6b6b',
+          desc: 'Raiders march from the forest edge toward camp. Most nights a miniboss leads; every 3rd night a true boss arrives with signature moves. Survive until dawn for wood and gold.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Daytime assaults',
+          tag: 'Wave',
+          color: '#ff9a6b',
+          desc: 'After grace, daytime assault waves periodically march on the camp. Held during night raids. Threat scales wave size and difficulty.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Day champions',
+          tag: 'Boss',
+          color: '#c4a35a',
+          desc: 'Killing wildlife can awaken a daytime champion of that species — a tough day-boss that marches on the camp. Chance rises with stars, species, and day number. Disabled during grace.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Rising threat',
+          tag: 'Scaling',
+          color: '#ffd23f',
+          desc: 'Threat climbs with run time. Beasts gain HP, damage, speed, and higher veterancy. Push farther for richer loot, or hug camp when nights get ugly.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Resources',
+          tag: 'Gather',
+          color: '#ffd9a0',
+          desc: 'Wood from trees, meat from beasts, gold from ore veins and lucky kills. Spend them at camp to fortify, produce, and gear up at the blacksmith.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Status effects',
+          tag: 'Combat',
+          color: '#6dd46a',
+          desc: 'Poison stacks DoT from nature attacks. Slow from gloom, vines, water spray, and similar. Burn pools (demonic deaths, fire trails, scorch) deal damage over time while you stand in them.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Coach tutorials',
+          tag: 'Tips',
+          color: '#7fd3ff',
+          desc: 'While Tutorials are On in Options, coach tips spotlight HUD and world targets each run. After a run you can turn them off. Toggle anytime in Options.',
+        }),
+      ];
+      count = worldCards.length;
+      html =
+        `<div class="fs-glossary-section">Run systems</div>
+         <p class="fs-glossary-blurb">How a run flows — calm openings, sieges, scaling, and hazards.</p>` +
+        worldCards.join('');
     } else {
       count = UPGRADES.length;
-      html = UPGRADES.map((def) => this.glossaryBuildingCard(def)).join('');
+      html =
+        `<div class="fs-glossary-section">Camp upgrades</div>
+         <p class="fs-glossary-blurb">Build while standing in the camp yard (<b>U</b> / Camp panel).
+         The blacksmith restocks gear; each smith item fills one slot and replaces what was there.</p>` +
+        UPGRADES.map((def) => this.glossaryBuildingCard(def)).join('');
     }
     list.innerHTML = html;
     if (countEl) countEl.textContent = `${count} entries`;
@@ -1320,7 +1630,7 @@ export class DomUI {
           <section class="fs-opt-sec">
             <h3>Tutorials</h3>
             <button type="button" class="fs-btn" id="opt-tutorials">On</button>
-            <p class="fs-opt-hint">Turning On resets tips so they play again.</p>
+            <p class="fs-opt-hint">While On, coach tips play every run. After a run you can turn them off.</p>
           </section>
           <div class="fs-opt-actions">
             <button type="button" class="fs-btn big" id="opt-apply">Apply changes</button>
@@ -1494,13 +1804,16 @@ export class DomUI {
 
   private buildTutorialShell() {
     this.tutorialEl.innerHTML = `
-      <div class="fs-panel fs-modal fs-tutorial-modal interactive">
+      <div class="fs-coach-dim" aria-hidden="true"></div>
+      <div class="fs-coach-hole" id="coach-hole" aria-hidden="true"></div>
+      <div class="fs-panel fs-coach-card interactive" id="coach-card">
+        <div class="fs-coach-badge">Tutorial</div>
         <h2 id="tutorial-title">Tip</h2>
         <div id="tutorial-body" class="fs-tutorial-body"></div>
         <div class="fs-confirm-actions">
           <button class="fs-btn big" id="btn-tutorial-ok" type="button">Got it</button>
         </div>
-        <p class="small">Enter or Esc to continue</p>
+        <p class="small">Enter or Esc · game is paused</p>
       </div>
     `;
     this.tutorialEl.querySelector('#btn-tutorial-ok')?.addEventListener('click', () => {
@@ -1518,37 +1831,92 @@ export class DomUI {
     return !this.tutorialEl.classList.contains('hidden');
   }
 
+  /** Pause + spotlight a HUD element with a short coach card. */
   showTutorial(id: string) {
-    const def = TUTORIAL_CONTENT[id];
+    const def = COACH_STEPS[id];
     if (!def) return;
     const title = this.tutorialEl.querySelector('#tutorial-title');
     const body = this.tutorialEl.querySelector('#tutorial-body');
     if (title) title.textContent = def.title;
     if (body) body.innerHTML = def.body;
+    this.coachTargetKey = def.target || null;
     this.tutorialEl.classList.remove('hidden');
-    // Fit after layout so high UI/font scale or short screens never sprout a scrollbar.
-    requestAnimationFrame(() => this.fitTutorialModal());
+    this.tutorialEl.classList.toggle('fs-coach-notarget', !def.target);
+    // Two frames: camp tab / panel layout settles, then measure the hole.
+    requestAnimationFrame(() => requestAnimationFrame(() => this.layoutCoach()));
   }
 
   hideTutorial() {
     this.tutorialEl.classList.add('hidden');
-    const modal = this.tutorialEl.querySelector('.fs-tutorial-modal') as HTMLElement | null;
-    if (modal) modal.style.transform = '';
+    this.coachTargetKey = null;
+    const hole = this.tutorialEl.querySelector('#coach-hole') as HTMLElement | null;
+    if (hole) hole.style.cssText = '';
   }
 
-  /** Scale the tutorial card down when content would overflow the viewport. */
-  private fitTutorialModal() {
-    const modal = this.tutorialEl.querySelector('.fs-tutorial-modal') as HTMLElement | null;
-    if (!modal || this.tutorialEl.classList.contains('hidden')) return;
-    modal.style.transform = '';
-    const pad = 12;
-    const availW = Math.max(120, this.tutorialEl.clientWidth - pad * 2);
-    const availH = Math.max(120, this.tutorialEl.clientHeight - pad * 2);
-    const needW = modal.scrollWidth;
-    const needH = modal.scrollHeight;
-    if (needW <= availW && needH <= availH) return;
-    const scale = Math.max(0.62, Math.min(1, availW / needW, availH / needH));
-    if (scale < 0.999) modal.style.transform = `scale(${scale})`;
+  /** Position the spotlight hole + card relative to the highlighted element. */
+  private layoutCoach() {
+    if (this.tutorialEl.classList.contains('hidden')) return;
+    const hole = this.tutorialEl.querySelector('#coach-hole') as HTMLElement | null;
+    const card = this.tutorialEl.querySelector('#coach-card') as HTMLElement | null;
+    if (!hole || !card) return;
+
+    const key = this.coachTargetKey;
+    const pad = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    let r: { left: number; top: number; right: number; bottom: number; width: number; height: number } | null =
+      null;
+    if (key) {
+      const world = this.onCoachWorldRect?.(key);
+      if (world) {
+        r = {
+          left: world.x,
+          top: world.y,
+          width: world.w,
+          height: world.h,
+          right: world.x + world.w,
+          bottom: world.y + world.h,
+        };
+      } else {
+        const el = this.root.querySelector(`[data-coach="${key}"]`) as HTMLElement | null;
+        if (el) {
+          const b = el.getBoundingClientRect();
+          r = { left: b.left, top: b.top, right: b.right, bottom: b.bottom, width: b.width, height: b.height };
+        }
+      }
+    }
+
+    if (!r) {
+      hole.classList.add('hidden');
+      card.style.left = '50%';
+      card.style.top = '50%';
+      card.style.transform = 'translate(-50%, -50%)';
+      return;
+    }
+
+    hole.classList.remove('hidden');
+    const hx = Math.max(4, r.left - pad);
+    const hy = Math.max(4, r.top - pad);
+    const hw = Math.min(vw - hx - 4, r.width + pad * 2);
+    const hh = Math.min(vh - hy - 4, r.height + pad * 2);
+    hole.style.left = `${hx}px`;
+    hole.style.top = `${hy}px`;
+    hole.style.width = `${Math.max(24, hw)}px`;
+    hole.style.height = `${Math.max(24, hh)}px`;
+
+    // Prefer below the target; flip above / to the side if needed.
+    card.style.transform = '';
+    const cardW = Math.min(340, vw - 24);
+    card.style.width = `${cardW}px`;
+    let left = r.left + r.width / 2 - cardW / 2;
+    left = Math.max(12, Math.min(vw - cardW - 12, left));
+    let top = r.bottom + 14;
+    const ch = card.offsetHeight || 160;
+    if (top + ch > vh - 12) top = Math.max(12, r.top - ch - 14);
+    if (top + ch > vh - 12) top = Math.max(12, (vh - ch) / 2);
+    card.style.left = `${left}px`;
+    card.style.top = `${top}px`;
   }
 
   private buildUpdateShell() {
@@ -1787,6 +2155,8 @@ export class DomUI {
       this.tipEl.textContent = '';
       this.tipPopEl.classList.add('hidden');
       this.bossHudEl.classList.add('hidden');
+      this.eventHudEl.classList.add('hidden');
+      this.bannerEl.classList.add('hidden');
     }
   }
 

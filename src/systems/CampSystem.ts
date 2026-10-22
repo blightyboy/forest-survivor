@@ -117,8 +117,12 @@ export class CampSystem {
   raidActive = false;
   raidAnnounced = false;
   campAlertCd = 0;
+  /** Throttle red screen flash while structures take continuous DPS. */
+  structureHitFlashCd = 0;
   healFx = 0;
   onCampAttack?: () => void;
+  /** Fired (throttled) whenever the cabin or a palisade takes damage. */
+  onStructureHit?: () => void;
   onNightBoss?: (kind: 'mini' | 'true', day: number) => void;
   /** Fired when the night raid banner should show (count + directions). */
   onRaidStart?: (day: number, count: number, directions: string) => void;
@@ -494,9 +498,17 @@ export class CampSystem {
     return this.contains(x, y, pad);
   }
 
+  /** Red screen flash when camp / palisade is struck (throttled for continuous DPS). */
+  notifyStructureHit() {
+    if (this.structureHitFlashCd > 0) return;
+    this.structureHitFlashCd = 0.16;
+    this.onStructureHit?.();
+  }
+
   damageWall(w: WallSeg, dmg: number) {
-    if (!w.alive) return;
+    if (!w.alive || dmg <= 0) return;
     w.hp -= dmg;
+    this.notifyStructureHit();
     for (const s of w.sprites) s.setTint(0xffccaa);
     this.scene.time.delayedCall(80, () => {
       if (w.alive) for (const s of w.sprites) s.clearTint();
@@ -617,7 +629,9 @@ export class CampSystem {
   }
 
   damage(amount: number) {
+    if (amount <= 0) return this.hp <= 0;
     this.hp -= amount;
+    this.notifyStructureHit();
     return this.hp <= 0;
   }
 
@@ -640,9 +654,9 @@ export class CampSystem {
 
   /**
    * Legacy startRaid + spawnMiniboss/spawnTrueBoss — call once when night begins.
-   * Builds a spawn queue (staggered) and always drops the night boss.
+   * Builds a spawn queue (staggered) and drops the night boss once grace has ended.
    */
-  startNightRaid(dayNumber: number, animals: AnimalSystem, threatM: number) {
+  startNightRaid(dayNumber: number, animals: AnimalSystem, threatM: number, graceLeft = 0) {
     if (this.assaultNight === dayNumber && this.raidActive) return;
     if (!this.raidAngles.length) this.prepareRaidFronts(dayNumber);
 
@@ -680,13 +694,14 @@ export class CampSystem {
     this.onRaidStart?.(dayNumber, count, dirs);
     this.onNightBoss?.(isBossNight(dayNumber) ? 'true' : 'mini', dayNumber);
 
-    // Boss leads the night (legacy: same frame as startRaid). Retry in update if capped.
-    this.trySpawnNightBoss(animals, threatM);
+    // Boss leads the night once start-of-run grace ends (retry in update).
+    this.trySpawnNightBoss(animals, threatM, graceLeft);
   }
 
   /** Spawn (or retry) the night miniboss / true boss. */
-  private trySpawnNightBoss(animals: AnimalSystem, threatM: number) {
+  private trySpawnNightBoss(animals: AnimalSystem, threatM: number, graceLeft = 0) {
     if (this.nightBossSpawned) return;
+    if (graceLeft > 0) return;
     const dayNumber = this.assaultNight || 1;
     const ww = animals.worldSize.w;
     const wh = animals.worldSize.h;
@@ -702,10 +717,10 @@ export class CampSystem {
   }
 
   /** Drain the night raid queue (legacy updateRaid). */
-  updateNightRaid(dt: number, animals: AnimalSystem, threatM: number) {
+  updateNightRaid(dt: number, animals: AnimalSystem, threatM: number, graceLeft = 0) {
     if (!this.raidActive) return;
     // Boss first — never let the animal soft-cap eat the night lead.
-    if (!this.nightBossSpawned) this.trySpawnNightBoss(animals, threatM);
+    if (!this.nightBossSpawned) this.trySpawnNightBoss(animals, threatM, graceLeft);
     if (!this.raidQueue.length) return;
     this.raidSpawnT -= dt;
     if (this.raidSpawnT > 0) return;
@@ -781,6 +796,7 @@ export class CampSystem {
     isNight: boolean,
     dayNumber: number,
     threatM: number,
+    graceLeft: number,
     onRaid: () => void,
   ) {
     const s = this.stats;
@@ -844,15 +860,16 @@ export class CampSystem {
     if (isNight) {
       if (!this.raidActive && this.assaultNight !== dayNumber) {
         // Fallback if phase enter was missed (huge dt / tab blur).
-        this.startNightRaid(dayNumber, animals, threatM);
+        this.startNightRaid(dayNumber, animals, threatM, graceLeft);
         onRaid();
       }
-      this.updateNightRaid(dt, animals, threatM);
+      this.updateNightRaid(dt, animals, threatM, graceLeft);
     }
 
     this.updateOverlays();
 
     if (this.campAlertCd > 0) this.campAlertCd -= dt;
+    if (this.structureHitFlashCd > 0) this.structureHitFlashCd -= dt;
     const wallsUp = this.walls.some((w) => w.alive);
     for (const a of animals.animals) {
       if (a.dead || a.leaving) continue;
@@ -879,7 +896,7 @@ export class CampSystem {
         }
       }
       if (sieging && !wallsUp && dist2(a.x, a.y, this.x, this.y - 40) < 70 * 70) {
-        this.hp -= a.dmg * dt * 0.8;
+        this.damage(a.dmg * dt * 0.8);
         if (this.campAlertCd <= 0) {
           this.campAlertCd = 10;
           this.onCampAttack?.();

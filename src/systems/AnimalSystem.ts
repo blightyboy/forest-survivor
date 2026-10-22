@@ -121,6 +121,8 @@ export interface AnimalEntity {
   lootMult: number;
   /** Necro split fragment — reduced loot (legacy fromSplit). */
   fromSplit: boolean;
+  /** Hit by the player — ignores start-of-run grace and hunts back. */
+  provoked: boolean;
   /** Wall currently pushing this animal (set by CampSystem). */
   blockWall: WallSeg | null;
   /** Windup targeting a wall / cabin instead of the player. */
@@ -131,6 +133,9 @@ export interface AnimalEntity {
   /** Elemental / boss special (legacy abilities.js). */
   ability: AnimalAbility | null;
   abilityCd: number;
+  /** Elemental moves rolled from the element pool (more with higher stars). */
+  elemMoves: string[];
+  elemMoveCd: Record<string, number>;
   bossMoves: BossAbilityId[];
   bossMoveCd: Record<string, number>;
   inspireT: number;
@@ -438,10 +443,13 @@ export class AnimalSystem {
       xpMult: sm.xp * vm.xp,
       lootMult: sm.loot * vm.loot,
       fromSplit: !!opts.fromSplit,
+      provoked: false,
       blockWall: null,
       strikeStructure: false,
       ability: null,
       abilityCd: 0,
+      elemMoves: [],
+      elemMoveCd: {},
       bossMoves: [],
       bossMoveCd: {},
       inspireT: 0,
@@ -680,6 +688,7 @@ export class AnimalSystem {
 
   /** Daytime champion — spawn well outside the kill / camp (legacy spawnDayBoss). */
   spawnDayBoss(species: SpeciesId, nearX: number, nearY: number, dayNumber: number, threatM: number) {
+    if (this.graceLeft > 0) return;
     if (this.hasBossOfType(species)) return;
     const spot =
       this.findEnemySpawn(nearX, nearY, 280, 520, 36) ||
@@ -703,6 +712,7 @@ export class AnimalSystem {
   }
 
   tryDayBossFromKill(a: AnimalEntity, ctx: KillContext) {
+    if (this.graceLeft > 0) return;
     if (ctx.isNight || a.boss || a.raider || a.dayBoss) return;
     let kind: SpeciesId = a.species;
     if (!DAY_BOSS_SPECIES.includes(kind)) {
@@ -923,6 +933,8 @@ export class AnimalSystem {
     a.hp -= amount;
     a.hitCd = 0.15;
     a.flash = 0.12;
+    // Striking wildlife ends their grace — they hunt back.
+    a.provoked = true;
     if (a.hp > 0) return false;
     this.killAnimal(a, player, pickups, pools, ctx, lootMult);
     return true;
@@ -967,18 +979,27 @@ export class AnimalSystem {
       if (fromSplit) meat = Math.max(0, Math.floor(meat * 0.35));
       if (meat > 0) this.combat.spawnPickup('meat', a.x, a.y, meat);
 
-      // Gold
+      // Gold — chance scales with loot/greed/threat; amount always multiplies by lootM.
+      const greedLv = this.combat?.arsenal.passives.greed || 0;
       const goldChance = Math.min(
         1,
-        (a.boss ? 1 : sp.goldChance) * (1 + stars * 0.1) * (1 + tm * 0.05),
+        (a.boss ? 1 : Math.max(0.18, sp.goldChance * 1.35)) *
+          (1 + stars * 0.14) *
+          (1 + tm * 0.12) *
+          (1 + 0.12 * greedLv) *
+          Math.min(1.45, Math.sqrt(lootM)),
       );
-      let gold = Math.random() < goldChance ? sp.gold : 0;
+      let gold = Math.random() < goldChance ? Math.max(1, sp.gold) : 0;
       if (a.big) gold += 2;
       if (a.boss) gold += 6 + ctx.dayNumber;
       if (a.raider || a.assault) gold += 1;
+      // Pity: star/threat beasts, or a scrap chance so early wildlife isn't barren.
+      if (gold <= 0 && (stars >= 1 || tm >= 1.0 || Math.random() < 0.28 + tm * 0.05)) {
+        gold = 1;
+      }
       if (gold > 0) {
-        gold = Math.round(gold * lootM * threatLoot);
-        gold += Math.floor(stars * 0.55) + Math.floor(tm * 0.35);
+        gold = Math.max(1, Math.round(gold * lootM * threatLoot * 1.2));
+        gold += Math.floor(stars * 0.75) + Math.floor(tm * 0.6) + Math.floor(greedLv * 0.4);
         if (fromSplit) gold = Math.max(0, Math.floor(gold * 0.35));
         if (gold > 0) this.combat.spawnPickup('gold', a.x, a.y, Math.max(1, gold));
       }
@@ -999,6 +1020,23 @@ export class AnimalSystem {
       this.combat.spawnPickup('xp', a.x, a.y, Math.max(1, xp));
 
       if (!fromSplit) this.combat.rollPowerupDrop(a);
+
+      // Crimson Charm — chance to drop a healing heart (skipped during nukes / splits).
+      if (
+        !fromSplit &&
+        !this.combat.nuking &&
+        player.buffHearts > 0 &&
+        player.alive
+      ) {
+        let heartChance = 0.22;
+        if (a.boss || a.trueBoss) heartChance = 0.55;
+        else if (a.big || a.raider || a.assault) heartChance = 0.32;
+        else if (a.swarm) heartChance = 0.08;
+        heartChance += Math.min(0.2, (a.stars || 0) * 0.015);
+        if (Math.random() < heartChance) {
+          this.combat.spawnPickup('heart', a.x + rand(-6, 6), a.y + rand(-4, 4), 1);
+        }
+      }
     }
     // Variant death effects (skip during screen nukes so clears stay clean).
     if (!this.combat?.nuking) {
@@ -1168,6 +1206,9 @@ export class AnimalSystem {
     });
   }
 
+  /** Seconds left in start-of-run calm (wildlife won't hunt unless provoked). */
+  graceLeft = 0;
+
   update(
     dt: number,
     player: RunPlayer,
@@ -1176,7 +1217,9 @@ export class AnimalSystem {
     threatM: number,
     isNight: boolean,
     dayNumber: number,
+    graceLeft = 0,
   ) {
+    this.graceLeft = Math.max(0, graceLeft);
     const ctx: KillContext = { isNight, dayNumber, threatM };
 
     // Legacy spawn cadence ~1.6s. Hold ambient/swarms while a night raid owns the field.
@@ -1210,6 +1253,9 @@ export class AnimalSystem {
       if (a.inspireT > 0) {
         a.inspireT = Math.max(0, a.inspireT - dt);
         if (a.inspireT <= 0) a.inspireMul = 1;
+      }
+      for (const id of Object.keys(a.elemMoveCd)) {
+        if (a.elemMoveCd[id] > 0) a.elemMoveCd[id] = Math.max(0, a.elemMoveCd[id] - dt);
       }
       for (const id of Object.keys(a.bossMoveCd)) {
         if (a.bossMoveCd[id] > 0) a.bossMoveCd[id] = Math.max(0, a.bossMoveCd[id] - dt);
@@ -1274,12 +1320,33 @@ export class AnimalSystem {
       else if (a.trueBoss) engageR = Math.max(920, aggroR);
       else if (a.dayBoss || a.boss) engageR = Math.max(720, aggroR);
 
-      const canSiege = siegeOk && !a.swarm;
       const playerLive = player.alive;
-      const playerInAggro = playerLive && dist < aggroR;
+      // Opening grace: wildlife ignores player AND camp until struck (or the timer ends).
+      const peaceful = this.graceLeft > 0 && !a.provoked;
+      const canHuntPlayer = !peaceful;
+      const canSiege = siegeOk && !a.swarm && !peaceful;
+      const playerInAggro = canHuntPlayer && playerLive && dist < aggroR;
       const baseInAggro =
         canSiege && cd < aggroR * (a.dayBoss || a.raider || a.boss || a.assault ? 1.6 : 1.2);
       const preferPlayer = playerInAggro && (!baseInAggro || dist <= cd * 0.92);
+
+      // Drop hunt / siege states while grace is active and this beast isn't provoked.
+      if (
+        peaceful &&
+        (a.state === 'chase' ||
+          a.state === 'march' ||
+          a.state === 'ability' ||
+          a.state === 'shoot' ||
+          a.state === 'lunge' ||
+          a.state === 'windup' ||
+          a.state === 'cooldown')
+      ) {
+        a.state = 'wander';
+        a.stateT = rand(0.8, 2);
+        a.vx = a.vy = 0;
+        a.ability = null;
+        a.strikeStructure = false;
+      }
 
       if (a.state === 'wander') {
         a.stateT -= dt;
@@ -1294,12 +1361,12 @@ export class AnimalSystem {
           if (dist < 520) {
             Audio.playSfx(isWolfish(a.species) ? 'growl' : isBearish(a.species) ? 'roar' : 'grunt');
           }
-        } else if (baseInAggro || a.raider || a.assault || a.dayBoss) a.state = 'march';
+        } else if (baseInAggro || (!peaceful && (a.raider || a.assault || a.dayBoss))) a.state = 'march';
       } else if (a.state === 'march') {
         if (preferPlayer && dist < engageR) {
           a.state = 'chase';
         } else if (!canSiege) {
-          a.state = playerInAggro ? 'chase' : 'wander';
+          a.state = canHuntPlayer && playerInAggro ? 'chase' : 'wander';
         } else {
           const wall = a.blockWall && a.blockWall.alive ? a.blockWall : null;
           const tx = wall ? wall.x - a.x : cdx;
@@ -1338,8 +1405,8 @@ export class AnimalSystem {
         a.stateT -= dt;
         if (a.stateT <= 0) {
           if (preferPlayer && dist < engageR) a.state = 'chase';
-          else if (baseInAggro || a.raider || a.assault || a.dayBoss || a.boss) a.state = 'march';
-          else a.state = dist < aggroR ? 'chase' : 'wander';
+          else if (baseInAggro || (!peaceful && (a.raider || a.assault || a.dayBoss || a.boss))) a.state = 'march';
+          else a.state = playerInAggro ? 'chase' : 'wander';
         }
       } else if (a.state === 'chase') {
         if (!playerLive || dist > engageR + 180) {
@@ -1425,8 +1492,8 @@ export class AnimalSystem {
       } else if (a.state === 'cooldown') {
         if (a.cd <= 0) {
           if (preferPlayer && dist < engageR) a.state = 'chase';
-          else if (baseInAggro || a.raider || a.assault || a.dayBoss || a.boss) a.state = 'march';
-          else a.state = dist < aggroR ? 'chase' : 'wander';
+          else if (baseInAggro || (!peaceful && (a.raider || a.assault || a.dayBoss || a.boss))) a.state = 'march';
+          else a.state = playerInAggro ? 'chase' : 'wander';
         }
       }
 

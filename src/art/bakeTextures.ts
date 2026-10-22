@@ -352,12 +352,36 @@ function bakePickups(scene: Phaser.Scene) {
     ctx.restore();
   });
 
+  // Healing heart drop (Crimson Charm).
+  bake('pickup_heart', (ctx, cx, cy) => {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.fillStyle = 'rgba(255,90,122,0.3)';
+    ellipsePath(ctx, 0, 0, 13, 13);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0, 7);
+    ctx.bezierCurveTo(-10, 1, -6, -8, 0, -3);
+    ctx.bezierCurveTo(6, -8, 10, 1, 0, 7);
+    ctx.closePath();
+    ctx.fillStyle = '#ff5a7a';
+    ctx.fill();
+    ctx.strokeStyle = '#5a1214';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.fillStyle = '#ffb3b5';
+    ellipsePath(ctx, -3.2, -2.5, 2.2, 1.5);
+    ctx.fill();
+    ctx.restore();
+  }, 36);
+
   // Legacy entities.js powerup icons (glow + dark plate + glyph).
   const powerColors: Record<string, string> = {
     magnet: '#ff6b6b',
     fury: '#ff8a3d',
     vital: '#9ef08a',
     haste: '#7fd3ff',
+    hearts: '#ff5a7a',
     nuke: '#ffe066',
   };
   for (const [id, c] of Object.entries(powerColors)) {
@@ -410,6 +434,13 @@ function bakePickups(scene: Phaser.Scene) {
         ctx.lineTo(-2, 7);
         ctx.lineTo(1, 1);
         ctx.lineTo(-6, 1);
+        ctx.closePath();
+        ctx.fill();
+      } else if (id === 'hearts') {
+        ctx.beginPath();
+        ctx.moveTo(0, 6);
+        ctx.bezierCurveTo(-9, 0, -5, -7, 0, -3);
+        ctx.bezierCurveTo(5, -7, 9, 0, 0, 6);
         ctx.closePath();
         ctx.fill();
       } else if (id === 'nuke') {
