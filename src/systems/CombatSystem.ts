@@ -28,6 +28,10 @@ type Proj = {
   dirX?: number;
   dirY?: number;
   hitSet?: Set<number>;
+  /** Unique elemental look — tint + richer trails. */
+  unique?: boolean;
+  trailColor?: string | null;
+  _trailAcc?: number;
 };
 
 type FallingHammer = {
@@ -39,6 +43,9 @@ type FallingHammer = {
   gfx: Phaser.GameObjects.Image;
   shadow: Phaser.GameObjects.Ellipse;
   canvas?: CanvasSprite;
+  unique?: boolean;
+  trailColor?: string | null;
+  _trailAcc?: number;
 };
 
 /** Legacy `Pike` — traveling thrust with shaft hitbox. */
@@ -56,6 +63,9 @@ type PikeThrust = {
   element: ElementId | null;
   hit: Set<number>;
   canvas: CanvasSprite;
+  unique?: boolean;
+  trailColor?: string | null;
+  _trailAcc?: number;
 };
 
 /** Legacy Dynamite — lobbed in an arc, explodes on landing for AoE. */
@@ -606,7 +616,7 @@ export class CombatSystem {
       this.axeSprites.pop();
     }
 
-    // Legacy Arsenal.drawTrails — orbit ring + motion wedges.
+    // Legacy Arsenal.drawTrails — orbit ring + motion wedges (elemental gradient accents).
     if (!this.axeTrailGfx) {
       this.axeTrailGfx = this.scene.add.graphics().setDepth(6);
       this.fxLayerSafeAdd(this.axeTrailGfx);
@@ -615,19 +625,35 @@ export class CombatSystem {
     tg.clear();
     if (player.alive && count > 0) {
       const R = range;
-      tg.lineStyle(st.unique ? 3 : 2, st.unique ? 0xffe8c0 : 0xffffff, st.unique ? 0.22 : 0.08);
+      const elemental = !!el && !!st.trail;
+      const accentCol = st.accent
+        ? Phaser.Display.Color.HexStringToColor(st.accent).color
+        : 0xffe8c0;
+      const trailCol = st.trail
+        ? Phaser.Display.Color.HexStringToColor(st.trail).color
+        : 0xffffff;
+      const metalCol = st.metal
+        ? Phaser.Display.Color.HexStringToColor(st.metal).color
+        : trailCol;
+      const ringA = unique ? 0.28 : elemental ? 0.18 : 0.08;
+      tg.lineStyle(unique ? 3.5 : elemental ? 2.6 : 2, elemental ? accentCol : 0xffffff, ringA);
       tg.strokeEllipse(player.x, player.y, R * 2, R * 2);
-      const len = Math.min(1, Math.max(0.35, speed * 0.09));
-      const segs = 6;
-      const inner = 14;
-      const trailCol = st.trail ? Phaser.Display.Color.HexStringToColor(st.trail).color : 0xffffff;
+      if (elemental) {
+        tg.lineStyle(unique ? 1.5 : 1, metalCol, unique ? 0.35 : 0.22);
+        tg.strokeEllipse(player.x, player.y, R * 2.08, R * 2.08);
+      }
+      const len = Math.min(1.15, Math.max(0.35, speed * 0.1));
+      const segs = unique ? 8 : elemental ? 7 : 6;
+      const inner = unique ? 12 : 14;
+      const wedgeA = unique ? 0.16 : elemental ? 0.12 : 0.09;
       for (let i = 0; i < count; i++) {
         const ang = this.axeAngle + (i / count) * TAU;
         for (let s = 0; s < segs; s++) {
           const a1 = ang - (len * s) / segs;
           const a0 = ang - (len * (s + 1)) / segs;
-          const alpha = 0.09 * (1 - s / segs);
-          tg.fillStyle(trailCol, alpha);
+          const fade = 1 - s / segs;
+          const col = elemental ? (s % 2 === 0 ? trailCol : metalCol) : trailCol;
+          tg.fillStyle(col, wedgeA * fade);
           tg.beginPath();
           tg.arc(player.x, player.y, R, a0, a1, false);
           tg.arc(player.x, player.y, inner, a1, a0, true);
@@ -649,6 +675,20 @@ export class CombatSystem {
         .setDepth(Math.floor(ay) + 4)
         .clearTint()
         .setScale(unique ? 1.12 : 1);
+      if (el && st.metal) {
+        spr.setTint(Phaser.Display.Color.HexStringToColor(st.metal).color);
+      }
+      // Ember/droplet accents along the orbit for any elemental infusion.
+      if (el && Math.random() < dt * (unique ? 16 : 10)) {
+        this.vfx?.trail(ax, ay, {
+          element: el,
+          color: st.trail || undefined,
+          strength: unique ? 0.95 : 0.7,
+          rich: unique,
+          vx: -Math.sin(ang) * speed * range,
+          vy: Math.cos(ang) * speed * range,
+        });
+      }
       this.hitArea(ax, ay + 16, 16 * areaM, dmg, player, el, true, `axe${i}`);
     }
   }
@@ -674,12 +714,28 @@ export class CombatSystem {
     }
     const baseSize = key === 'spikes' ? 128 : 64;
     const scale = (r * 2) / baseSize;
+    const auraTint =
+      el === 'fire' ? 0xff8a4a
+        : el === 'water' ? 0x9ad4ff
+          : el === 'nature' ? 0x8fd98a
+            : el === 'earth' ? 0xd4b878
+              : el === 'light' ? 0xffe66d
+                : el === 'darkness' ? 0xb89ae8
+                  : 0xffb347;
     spr.setVisible(true)
       .setPosition(player.x, player.y)
       .setScale(scale)
       .setDepth(Math.floor(player.y) - 2)
-      .setTint(el === 'fire' ? 0xff8a4a : el === 'water' ? 0x9ad4ff : el === 'nature' ? 0x8fd98a : 0xffb347)
+      .setTint(auraTint)
       .setRotation((spr.rotation || 0) + dt * (key === 'spikes' ? 0.15 : 0.6));
+    if (el && Math.random() < dt * 10) {
+      const a = Math.random() * TAU;
+      this.vfx?.trail(
+        player.x + Math.cos(a) * r * 0.85,
+        player.y + Math.sin(a) * r * 0.45 - 4,
+        { element: el, strength: 0.55, rich: false },
+      );
+    }
 
     if (!this.weaponReady(key, dt)) return;
     // Legacy always re-arms tick * cooldown (even if nothing was hit).
@@ -725,7 +781,7 @@ export class CombatSystem {
       this.spawnProjectile(
         player.x, player.y - 8,
         Math.cos(ang) * speed, Math.sin(ang) * speed,
-        stats.dmg as number, stats.pierce as number || 1, life, el, tex,
+        stats.dmg as number, stats.pierce as number || 1, life, el, tex, id,
       );
     }
     if (id === 'hatchet') Audio.playSfx('throw');
@@ -752,7 +808,7 @@ export class CombatSystem {
       this.spawnProjectile(
         player.x, player.y - 4,
         Math.cos(ang) * speed, Math.sin(ang) * speed,
-        stats.dmg as number, stats.pierce as number || 1, life, el, 'knife',
+        stats.dmg as number, stats.pierce as number || 1, life, el, 'knife', 'knife',
       );
     }
     Audio.playSfx('throw', 1.25);
@@ -794,6 +850,9 @@ export class CombatSystem {
         element: el,
         hit: new Set(),
         canvas: cs,
+        unique,
+        trailColor: st.trail,
+        _trailAcc: 0,
       });
     }
     Audio.playSfx('throw', 1.2);
@@ -816,6 +875,22 @@ export class CombatSystem {
         .setPosition(pk.x, pk.y - 10)
         .setRotation(pk.angle)
         .setDepth(Math.floor(pk.y) + 8);
+      pk._trailAcc = (pk._trailAcc || 0) + dt;
+      {
+        const elemental = !!pk.element;
+        const interval = pk.unique ? 0.016 : elemental ? 0.024 : 0.045;
+        if (pk._trailAcc >= interval) {
+          pk._trailAcc = 0;
+          this.vfx?.trail(pk.x + c * pk.len * 0.35, pk.y - 10 + s * pk.len * 0.35, {
+            element: pk.element,
+            color: pk.trailColor || undefined,
+            strength: pk.unique ? 1.05 : elemental ? 0.8 : 0.45,
+            rich: !!(pk.unique || elemental),
+            vx: pk.vx,
+            vy: pk.vy,
+          });
+        }
+      }
       for (const a of this.animals.animals) {
         if (a.dead || pk.hit.has(a.uid) || pk.pierce <= 0) continue;
         const dx = a.x - pk.x;
@@ -857,6 +932,11 @@ export class CombatSystem {
       const dirY = Math.sin(ang);
       const gfx = this.scene.add.image(player.x, player.y - 8, key).setDepth(15).setScale(1);
       this.fx.add(gfx);
+      const sawOpts = this.arsenal.fireOpts('saw');
+      const sawUnique = !!(sawOpts.unique && el);
+      if (el && sawOpts.style.metal) {
+        gfx.setTint(Phaser.Display.Color.HexStringToColor(sawOpts.style.metal).color);
+      }
       this.projectiles.push({
         x: player.x,
         y: player.y - 8,
@@ -876,6 +956,9 @@ export class CombatSystem {
         dirX,
         dirY,
         hitSet: new Set(),
+        unique: sawUnique,
+        trailColor: sawOpts.style.trail,
+        _trailAcc: 0,
       });
     }
     Audio.playSfx('throw', 0.7);
@@ -944,6 +1027,15 @@ export class CombatSystem {
         .setRotation(d.spin)
         .setDepth(Math.floor(d.y) + 20);
       d.shadow.setPosition(d.x, d.y + 1).setDepth(Math.floor(d.y) - 1).setAlpha(0.22 * (1 - k * 0.3));
+      if (Math.random() < dt * 18) {
+        this.vfx?.trail(d.x, d.y - 12 - d.z, {
+          element: d.element,
+          color: d.element ? ELEMENTS[d.element]?.color : '#ffb347',
+          strength: d.element ? 0.9 : 0.55,
+          rich: !!d.element,
+          vy: -40,
+        });
+      }
       if (k >= 1) {
         d.dead = true;
         this.explodeDynamite(d.x, d.y, d.radius, d.dmg, player, d.element);
@@ -993,15 +1085,21 @@ export class CombatSystem {
       const t = pool[Math.floor(Math.random() * pool.length)];
       const tx = t.x + rand(-18, 18);
       const ty = t.y + rand(-12, 12);
+      const hmSt = this.arsenal.drawStyle('hammerfall');
+      const hmUnique = hmSt.unique;
       const cs = new CanvasSprite(this.scene, this.fx, 40, 44, `rt_hammer_${this.axeUid++}`, 0.5, 0.85);
       cs.clear();
       cs.ctx.save();
       cs.ctx.translate(cs.w / 2, cs.h * 0.45);
+      drawUniqueGlow(cs.ctx, 0, -2, 14, hmSt);
       drawHammer(cs.ctx);
       cs.ctx.restore();
       cs.refresh();
       const gfx = cs.image;
       gfx.setPosition(tx, ty - 200).setDepth(20);
+      if (el && hmSt.metal) {
+        gfx.setTint(Phaser.Display.Color.HexStringToColor(hmSt.metal).color);
+      }
       const shadow = this.scene.add.ellipse(tx, ty + 1, 28, 10, 0x000000, 0.22).setDepth(Math.floor(ty) - 1);
       this.fx.add(shadow);
       this.hammers.push({
@@ -1018,6 +1116,9 @@ export class CombatSystem {
         gfx,
         shadow,
         canvas: cs,
+        unique: hmUnique,
+        trailColor: hmSt.trail,
+        _trailAcc: 0,
       });
     }
     Audio.playSfx('throw', 0.45);
@@ -1032,7 +1133,22 @@ export class CombatSystem {
       const k = clamp(1 - h.z / 240, 0.2, 1);
       h.shadow.setPosition(h.x, h.y + 1).setScale(k, k).setAlpha(0.22 * k);
       h.gfx.setPosition(h.x, h.y - h.z - 8).setRotation(h.spin).setDepth(Math.floor(h.y - h.z) + 20);
-      if (h.z > 0) continue;
+      if (h.z > 0) {
+        h._trailAcc = (h._trailAcc || 0) + dt;
+        const elemental = !!h.element;
+        const interval = h.unique ? 0.018 : elemental ? 0.026 : 0.05;
+        if (h._trailAcc >= interval) {
+          h._trailAcc = 0;
+          this.vfx?.trail(h.x, h.y - h.z - 8, {
+            element: h.element,
+            color: h.trailColor || undefined,
+            strength: h.unique ? 1.05 : elemental ? 0.8 : 0.45,
+            rich: !!(h.unique || elemental),
+            vy: 200,
+          });
+        }
+        continue;
+      }
       if (!h.hit) {
         h.hit = true;
         this.hitArea(h.x, h.y, h.radius, h.dmg, player, h.element, false);
@@ -1111,13 +1227,39 @@ export class CombatSystem {
   private spawnProjectile(
     x: number, y: number, vx: number, vy: number,
     dmg: number, pierce: number, life: number, el: ElementId | null, tex: string,
+    weaponId?: string,
   ) {
     const key = this.scene.textures.exists(tex) ? tex : 'particle';
     const gfx = this.scene.add.image(x, y, key).setDepth(15).setScale(tex === 'saw' ? 1 : 0.95);
     gfx.setRotation(Math.atan2(vy, vx));
+    const opts = weaponId ? this.arsenal.fireOpts(weaponId) : null;
+    const unique = !!(opts?.unique && el);
+    const st = opts?.style;
+    if (el && st?.metal) {
+      gfx.setTint(Phaser.Display.Color.HexStringToColor(st.metal).color);
+    }
     this.fx.add(gfx);
     this.projectiles.push({
       x, y, vx, vy, dmg, pierce, life, r: 10, element: el, dead: false, gfx, hitSet: new Set(),
+      unique,
+      trailColor: st?.trail || null,
+      _trailAcc: 0,
+    });
+  }
+
+  private emitProjTrail(p: Proj, dt: number) {
+    p._trailAcc = (p._trailAcc || 0) + dt;
+    const elemental = !!p.element;
+    const interval = p.unique ? 0.02 : elemental ? 0.028 : 0.05;
+    if (p._trailAcc < interval) return;
+    p._trailAcc = 0;
+    this.vfx?.trail(p.x, p.y, {
+      element: p.element,
+      color: p.trailColor || undefined,
+      strength: p.unique ? 1.05 : elemental ? 0.75 : 0.4,
+      rich: !!(p.unique || elemental),
+      vx: p.vx,
+      vy: p.vy,
     });
   }
 
@@ -1148,6 +1290,7 @@ export class CombatSystem {
           if (d < 22 || p.life <= 0) p.dead = true;
         }
         p.gfx.setPosition(p.x, p.y).setRotation(p.gfx.rotation + dt * 26).setDepth(Math.floor(p.y) + 15);
+        this.emitProjTrail(p, dt);
         for (const a of this.animals.animals) {
           if (a.dead) continue;
           if (dist2(p.x, p.y, a.x, a.y) >= (p.r + a.radius) * (p.r + a.radius)) continue;
@@ -1168,6 +1311,7 @@ export class CombatSystem {
         .setPosition(p.x, p.y)
         .setRotation(spin ? p.gfx.rotation + spin : Math.atan2(p.vy, p.vx))
         .setDepth(Math.floor(p.y) + 15);
+      this.emitProjTrail(p, dt);
       if (p.life <= 0) p.dead = true;
       for (const a of this.animals.animals) {
         if (a.dead || p.pierce <= 0) continue;
@@ -1216,6 +1360,7 @@ export class CombatSystem {
     if (chopTrees) {
       const statics = this.world.queryStatic(x, y, r);
       for (const s of statics) {
+        if (!s.isHittable()) continue;
         const key = `${source}:${s.type}:${s.x},${s.y}`;
         if ((this.hitCdStatic.get(key) || 0) > 0) continue;
         if (dist2(x, y, s.x, s.y) > (r + s.radius) * (r + s.radius)) continue;
@@ -1305,6 +1450,8 @@ export class CombatSystem {
   }
 
   private hitStatic(s: StaticEntity, dmg: number, px: number, py: number, player?: RunPlayer) {
+    // Stumps / spent rocks must not chip or chop — axes still overlap their radius.
+    if (!s.isHittable()) return;
     if (s.type === 'tree') {
       const res = this.world.damageTree(s, dmg, px);
       this.vfx?.woodChips(s.x, s.y - 14, px, py, res.killed ? 10 : 4);

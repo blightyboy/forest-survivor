@@ -79,6 +79,8 @@ export class DomUI {
   onCoachWorldRect?: (key: string) => { x: number; y: number; w: number; h: number } | null;
   /** Legacy #gearHud — bottom-left equipment slot strip. */
   gearHudEl: HTMLElement;
+  /** Legacy #buildWatermark — in-run build version. */
+  watermarkEl: HTMLElement;
   optionsEl: HTMLElement;
   tipPopEl: HTMLElement;
   bannerEl: HTMLElement;
@@ -178,6 +180,9 @@ export class DomUI {
     this.loadoutEl = this.mk('div', 'fs-loadout interactive');
     this.loadoutEl.setAttribute('data-coach', 'loadout');
     this.gearHudEl = this.mk('div', 'fs-gear-hud interactive');
+    this.watermarkEl = this.mk('div', 'fs-build-watermark hidden');
+    this.watermarkEl.setAttribute('aria-hidden', 'true');
+    this.watermarkEl.textContent = BUILD_VERSION;
     this.tipPopEl = this.mk('div', 'fs-tip-pop hidden');
     this.optionsEl = this.mk('div', 'fs-overlay options-overlay hidden interactive');
     this.bannerEl = this.mk('div', 'fs-banner hidden');
@@ -190,6 +195,7 @@ export class DomUI {
       this.buffHudEl,
       this.gearHudEl,
       this.loadoutEl,
+      this.watermarkEl,
       this.tipPopEl,
       this.campPanelEl,
       this.bannerEl,
@@ -2150,6 +2156,7 @@ export class DomUI {
     this.loadoutEl.classList.toggle('hidden', !visible);
     this.gearHudEl.classList.toggle('hidden', !visible);
     this.buffHudEl.classList.toggle('hidden', !visible);
+    this.watermarkEl.classList.toggle('hidden', !visible);
     if (!visible) {
       this.tipEl.classList.add('hidden');
       this.tipEl.textContent = '';

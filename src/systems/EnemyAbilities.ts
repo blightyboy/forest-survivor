@@ -4,7 +4,7 @@
  * Telegraph → act, with ground hazards for spikes / vines / burn trails.
  */
 import Phaser from 'phaser';
-import { clamp, damp, dist2, rand, TAU, compactInPlace } from '../core/math';
+import { clamp, damp, dist2, lerp, rand, TAU, compactInPlace } from '../core/math';
 import type { ElementId } from '../data/constants';
 import type { RunPlayer } from '../run/RunTypes';
 import type { AnimalEntity } from './AnimalSystem';
@@ -812,7 +812,11 @@ export function updateAnimalAbility(
       const ang = ab.ang || 0;
       const kind = ab.id === 'elem_boulder' ? 'rock' : ab.id === 'elem_drain' ? 'bolt' : 'bolt';
       const el: ElementId | null =
-        ab.id === 'elem_boulder' ? 'earth' : ab.id === 'elem_drain' ? 'darkness' : 'water';
+        ab.id === 'elem_boulder'
+          ? 'earth'
+          : ab.id === 'elem_drain'
+            ? 'darkness'
+            : ((a.element as ElementId | null) || 'water');
       spawnElemBolt(
         a,
         ang,
@@ -830,6 +834,14 @@ export function updateAnimalAbility(
         layer,
       );
       fx?.sparks(a.x, a.y - 12, 6, ab.color);
+      fx?.trail(a.x + Math.cos(ang) * 18, a.y + Math.sin(ang) * 18 - 8, {
+        element: el,
+        color: ab.color,
+        strength: 1.1,
+        rich: true,
+        vx: Math.cos(ang) * (ab.speed || 300),
+        vy: Math.sin(ang) * (ab.speed || 300),
+      });
       Audio.playSfx('throw', 0.8);
       finishAbility(a, ab.id);
     } else if (ab.id === 'elem_torrent') {
@@ -935,10 +947,23 @@ export function updateAnimalAbility(
       const side = Math.random() < 0.5 ? 1 : -1;
       const ox = Math.cos(ang + side * 1.2) * (a.radius + 28);
       const oy = Math.sin(ang + side * 1.2) * (a.radius + 28);
-      fx?.sparks(a.x, a.y - 8, 10, ab.color);
+      const fromX = a.x;
+      const fromY = a.y;
+      fx?.sparks(fromX, fromY - 8, 10, ab.color);
       a.x = tx + ox;
       a.y = ty + oy;
       a.facing = player.x > a.x ? 1 : -1;
+      // Darkness smear along the blink path.
+      const steps = 6;
+      for (let i = 0; i <= steps; i++) {
+        const k = i / steps;
+        fx?.trail(lerp(fromX, a.x, k), lerp(fromY, a.y, k) - a.radius * 0.35, {
+          element: 'darkness',
+          color: ab.color,
+          strength: 1.2,
+          rich: true,
+        });
+      }
       if (dist2(a.x, a.y, player.x, player.y) < (a.radius + 22) ** 2) {
         hurt(player, Math.round(animalEffectiveDamage(a) * ab.dmgMul), onHurt, onFloat);
         applyPlayerSlow(player, 0.35, 1.2);
@@ -1017,10 +1042,23 @@ export function updateAnimalAbility(
     } else if (ab.id === 'boss_leap') {
       const tx = ab.tx || player.x;
       const ty = ab.ty || player.y;
-      fx?.sparks(a.x, a.y - 8, 10, ab.color);
+      const fromX = a.x;
+      const fromY = a.y;
+      fx?.sparks(fromX, fromY - 8, 10, ab.color);
       a.x = tx;
       a.y = ty;
       a.facing = player.x > a.x ? 1 : -1;
+      const steps = 5;
+      for (let i = 0; i <= steps; i++) {
+        const k = i / steps;
+        const arc = Math.sin(k * Math.PI) * 40;
+        fx?.trail(lerp(fromX, a.x, k), lerp(fromY, a.y, k) - arc, {
+          color: ab.color,
+          strength: 1.15,
+          rich: true,
+          vy: -80,
+        });
+      }
       const r = ab.radius || 78;
       if (dist2(a.x, a.y, player.x, player.y) < (r + 10) ** 2) {
         hurt(player, Math.round(animalEffectiveDamage(a) * ab.dmgMul), onHurt, onFloat);
@@ -1043,6 +1081,22 @@ export function updateAnimalAbility(
     tvx = (ab.tx || 0) * (ab.speed || 400);
     tvy = (ab.ty || 0) * (ab.speed || 400);
     ab.traveled = (ab.traveled || 0) + (ab.speed || 400) * dt;
+    ab._trailAcc = (ab._trailAcc || 0) + dt;
+    if (ab._trailAcc >= 0.03) {
+      ab._trailAcc = 0;
+      const el =
+        ab.id === 'boss_charge'
+          ? null
+          : ((a.element as ElementId | null) || 'fire');
+      fx?.trail(a.x, a.y - a.radius * 0.4, {
+        element: el,
+        color: ab.color,
+        strength: ab.id === 'boss_charge' ? 1.2 : 1,
+        rich: true,
+        vx: tvx,
+        vy: tvy,
+      });
+    }
     if (!a._abilHit && player.alive && dist2(a.x, a.y, player.x, player.y) < (a.radius + 19) ** 2) {
       a._abilHit = true;
       hurt(player, Math.round(animalEffectiveDamage(a) * ab.dmgMul), onHurt, onFloat);
@@ -1064,6 +1118,14 @@ export function updateAnimalAbility(
         life: ab.groundLife || 5.5, age: 0, delay: 0, dmg: 0, dps,
         element: 'fire', color: ab.color, hit: false, dead: false,
       });
+      fx?.trail(a.x, a.y - 6, {
+        element: 'fire',
+        color: ab.color,
+        strength: 1.15,
+        rich: true,
+        vx: tvx,
+        vy: tvy,
+      });
     }
     if (!a._abilHit && player.alive && dist2(a.x, a.y, player.x, player.y) < (a.radius + 17) ** 2) {
       a._abilHit = true;
@@ -1074,6 +1136,36 @@ export function updateAnimalAbility(
   }
 
   if (ab.id === 'boss_breath' || ab.id === 'boss_beam' || ab.id === 'elem_spray' || ab.id === 'elem_beam') {
+    const beamEl: ElementId | null =
+      ab.id === 'elem_spray'
+        ? 'water'
+        : ab.id === 'elem_beam'
+          ? 'light'
+          : ab.id === 'boss_breath'
+            ? 'water'
+            : 'light';
+    // Continuous elemental stream along the cone / beam while active.
+    ab._trailAcc = (ab._trailAcc || 0) + dt;
+    if (ab._trailAcc >= 0.028) {
+      ab._trailAcc = 0;
+      const ang = ab.ang || 0;
+      const len = ab.range || 240;
+      const isBeam = ab.id === 'elem_beam' || ab.id === 'boss_beam';
+      const samples = isBeam ? 5 : 4;
+      for (let i = 1; i <= samples; i++) {
+        const d = (len * i) / (samples + 0.5);
+        const spread = isBeam ? 0 : rand(-0.35, 0.35);
+        const a2 = ang + spread;
+        fx?.trail(a.x + Math.cos(a2) * d, a.y + Math.sin(a2) * d - 6, {
+          element: beamEl,
+          color: ab.color,
+          strength: isBeam ? 1.05 : 0.85,
+          rich: true,
+          vx: Math.cos(ang) * 180,
+          vy: Math.sin(ang) * 180,
+        });
+      }
+    }
     if (!a._abilHit) {
       a._abilHit = true;
       const dmg = Math.round(animalEffectiveDamage(a) * ab.dmgMul);
@@ -1146,6 +1238,15 @@ export function updateHazards(
         }
       }
     } else if (h.type === 'burn') {
+      if (Math.random() < dt * 8) {
+        fx?.trail(h.x + rand(-h.r * 0.55, h.r * 0.55), h.y + rand(-h.r * 0.35, h.r * 0.35) - 4, {
+          element: h.element || 'fire',
+          color: h.color,
+          strength: 0.55,
+          rich: false,
+          vy: -50,
+        });
+      }
       if (dist2(h.x, h.y, player.x, player.y) < (h.r + 6) ** 2) {
         h._acc = (h._acc || 0) + h.dps * dt;
         if (h._acc >= 1) {

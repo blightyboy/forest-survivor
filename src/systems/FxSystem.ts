@@ -168,6 +168,126 @@ export class FxSystem {
     this.dust(x, y, Math.round(16 * scale));
   }
 
+  /**
+   * Motion / skill trail — themed particles left behind moving weapons, bolts, and charges.
+   * Call every few frames (or with a small accumulator) while the source moves.
+   */
+  trail(
+    x: number,
+    y: number,
+    opts: {
+      element?: ElementId | null;
+      color?: string;
+      /** 0–1 density / size scale. */
+      strength?: number;
+      /** Inherit a bit of the projectile's velocity. */
+      vx?: number;
+      vy?: number;
+      /** Extra particles for unique / boss effects. */
+      rich?: boolean;
+    } = {},
+  ) {
+    const el = opts.element || null;
+    const strength = clamp(opts.strength ?? 0.7, 0.15, 1.5);
+    const rich = !!opts.rich;
+    const n = rich ? 2 + (Math.random() < 0.55 ? 1 : 0) : 1 + (Math.random() < strength ? 1 : 0);
+    const dragVx = (opts.vx || 0) * -0.08;
+    const dragVy = (opts.vy || 0) * -0.08;
+    const palette = this.trailPalette(el, opts.color);
+
+    for (let i = 0; i < n; i++) {
+      const col = palette[i % palette.length];
+      const ox = rand(-3, 3) * strength;
+      const oy = rand(-3, 3) * strength;
+      if (el === 'fire') {
+        this.spawnDot(
+          x + ox,
+          y + oy,
+          col,
+          rand(1.6, 3.4) * strength,
+          dragVx + rand(-18, 18),
+          dragVy + rand(-70, -20),
+          rand(0.18, 0.38),
+          rich ? 4 : 0,
+        );
+      } else if (el === 'water') {
+        this.spawnDot(
+          x + ox,
+          y + oy,
+          col,
+          rand(1.2, 2.8) * strength,
+          dragVx + rand(-25, 25),
+          dragVy + rand(10, 40),
+          rand(0.22, 0.42),
+        );
+      } else if (el === 'nature') {
+        this.spawnRect(
+          x + ox,
+          y + oy,
+          col,
+          rand(2, 4) * strength,
+          dragVx + rand(-30, 30),
+          dragVy + rand(-10, 35),
+          rand(0.28, 0.5),
+        );
+      } else if (el === 'earth') {
+        this.spawnRect(
+          x + ox,
+          y + oy,
+          col,
+          rand(1.5, 3.2) * strength,
+          dragVx + rand(-20, 20),
+          dragVy + rand(-15, 20),
+          rand(0.25, 0.45),
+        );
+      } else if (el === 'light') {
+        this.spawnDot(
+          x + ox,
+          y + oy,
+          col,
+          rand(1.8, 3.6) * strength,
+          dragVx + rand(-35, 35),
+          dragVy + rand(-40, 10),
+          rand(0.16, 0.32),
+        );
+      } else if (el === 'darkness') {
+        this.spawnDot(
+          x + ox,
+          y + oy,
+          col,
+          rand(2.2, 4.5) * strength,
+          dragVx + rand(-22, 22),
+          dragVy + rand(-25, 15),
+          rand(0.28, 0.5),
+          rich ? 6 : 3,
+        );
+      } else {
+        // Neutral / non-elemental: soft pale streak.
+        this.spawnDot(
+          x + ox,
+          y + oy,
+          col,
+          rand(1.2, 2.6) * strength,
+          dragVx + rand(-15, 15),
+          dragVy + rand(-20, 10),
+          rand(0.14, 0.3),
+        );
+      }
+    }
+  }
+
+  /** Secondary accents for gradient-style elemental trails. */
+  private trailPalette(element: ElementId | null, fallback?: string): string[] {
+    if (element === 'fire') return ['#ff6a3d', '#ffb347', '#ffe066', '#ff3d1a'];
+    if (element === 'water') return ['#4db8ff', '#9ad4ff', '#e8f7ff', '#2a8fd4'];
+    if (element === 'nature') return ['#6dd46a', '#9ef08a', '#3d8a3a', '#d4ffc8'];
+    if (element === 'earth') return ['#c4a35a', '#d4b878', '#8a6a3a', '#f0e0b0'];
+    if (element === 'light') return ['#ffe66d', '#fff8c8', '#ffffff', '#ffd23f'];
+    if (element === 'darkness') return ['#9b7bde', '#c4a8ff', '#5a3a8a', 'rgba(155,123,222,0.7)'];
+    if (fallback) return [fallback, '#ffffff', fallback];
+    return ['#e8e0d0', '#ffffff', '#c8c0b0'];
+  }
+
   /** Legacy Effects.elementHit — themed burst by attack element. */
   elementHit(x: number, y: number, element: ElementId, aff = 1, scale = 1) {
     const el = ELEMENTS[element];

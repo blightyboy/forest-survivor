@@ -249,16 +249,17 @@ export function weaponDrawStyle(
   if (flash) {
     return { metal: '#fff', wood: '#fff', accent: '#fff', glow: null, trail: '#fff', unique: false, scale: 1 };
   }
-  if (unique && element && ELEMENT_WEAPON_STYLE[element as ElementId]) {
+  // Elemental infusion always paints metal/trail accents; unique also glows + scales up.
+  if (element && ELEMENT_WEAPON_STYLE[element as ElementId]) {
     const s = ELEMENT_WEAPON_STYLE[element as ElementId];
     return {
       metal: s.metal,
       wood: s.wood,
       accent: s.accent,
-      glow: s.glow,
+      glow: unique ? s.glow : null,
       trail: s.trail,
-      unique: true,
-      scale: 1.12,
+      unique,
+      scale: unique ? 1.12 : 1,
     };
   }
   return {

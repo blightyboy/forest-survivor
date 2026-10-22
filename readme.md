@@ -2,24 +2,62 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.2.2-alpha-build`
+Version: `0.2.3-alpha-build`
 
 A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + Vite, packaged with Electron. Play as a lumberjack in a hostile forest: chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids.
 
 ---
 
+## At a glance
+
+| Content | Count |
+|---|---|
+| Beast species | **14** |
+| Animal variants | **4** (Basic, Dire, Necromantic, Demonic) |
+| Elements | **6** (Fire, Water, Nature, Earth, Light, Darkness) |
+| Elemental enemy abilities | **18** (3 per element; more unlock with veterancy) |
+| True-boss signature moves | **10** (2 rolled per true boss) |
+| Auto weapons | **12** (max level **8**; up to **5** equipped) |
+| Unique weapon forms | **72** (12 weapons × 6 element infusions) |
+| Level-up passives | **20** |
+| Element infusion cards | **6** |
+| Bonus cards | **2** (gold pouch, full heal) |
+| Level-up card pool | **40** kinds (weapons + passives + infusions + bonuses) |
+| World power-ups | **6** |
+| Camp upgrades | **11** |
+| Blacksmith gear slots | **14** |
+| Gear quality tiers | **6** (Poor → Legendary) |
+| Permanent meta upgrades | **15** |
+| Coach tutorials | **11** |
+| Opening grace | **30s** (peaceful wildlife; assaults/bosses held) |
+| Veterancy | up to **15★** (bronze → silver → gold) |
+
+---
+
 ## Game description
 
-You start with a camp and a basic palisade. Explore the forest, gather **wood**, **meat**, and **gold**, then spend them on fortifications and gear. Experience from kills levels you up; each level offers weapon, passive, elemental infusion, or bonus cards.
+You start with a camp and a palisade. Explore the forest, gather **wood**, **meat**, and **gold**, then spend them on fortifications and gear. Experience from kills levels you up; each level offers a weapon, passive, elemental infusion, or bonus card.
 
-Threat grows over time. Beasts gain **veterancy stars** and sometimes **elements** or **variants** (dire / necromantic / demonic). Some animals are melee chargers; sheep, raccoons, and beavers fight at range.
+Threat grows over time. Beasts gain **veterancy stars** and can roll **elements** or **variants**. Melee chargers rush you; sheep, raccoons, and beavers fight at range. Elemental foes telegraph specials — higher stars mean more moves from their element pool.
 
 ### Core loop
 
 1. **Chop & hunt** — fell trees, mine ore, defeat wildlife for resources and XP.
-2. **Level up** — choose weapons, passives, elemental infusions, or bonuses.
-3. **Fortify** — upgrade the camp: walls, towers, production buildings, blacksmith.
-4. **Survive the cycle** — night brings assault waves and raids on the camp.
+2. **Level up** — choose from the **40**-kind card pool (weapons, passives, infusions, bonuses).
+3. **Fortify** — upgrade the camp (**11** buildings), towers, production, and blacksmith.
+4. **Survive the cycle** — daytime assault waves, dusk warnings, then night raids (miniboss most nights; true boss every **3rd** night).
+
+### Opening grace
+
+The first **30 seconds** are calm: wildlife ignores you and the camp unless you strike first. Daytime assaults and boss spawns wait until grace ends.
+
+### Beasts & combat pressure
+
+- **14 species** — boar, wolf, bear (and dire forms), deer, fox, squirrel, rat, raccoon, duck, sheep, beaver.
+- **4 variants** — Dire (tougher), Necromantic (splits on death), Demonic (fire pool on death).
+- **6 elements** with **18** enemy abilities total; veterancy unlocks more moves (1 → 2 → 3 → full pool).
+- **10 true-boss moves** — Rampage, Fiery Ground, Inspiring Aura, Water Breath, Titan Stomp, Bone Volley, Crushing Leap, Skyfall, Ruin Beam, Dread Howl.
+- Status: poison DoT, slows, burn pools; camp/palisade hits flash a red vignette.
 
 ### Defenses & camp
 
@@ -27,23 +65,28 @@ Threat grows over time. Beasts gain **veterancy stars** and sometimes **elements
 |---|---|
 | **Camp** | Core HP and passive resource income. If it falls, the run ends. |
 | **Palisade** | Walls that block raiders. |
-| **Watchtower / Archers / Barrage / Volley** | Auto-firing tower defenses. |
+| **Watchtower / Archers / Barrage / Volley** | Auto-firing tower defenses (up to **8** towers). |
 | **Campfire** | Heals you while inside the camp. |
 | **Lumber Mill / Gold Mine / Butcher** | Periodic resource production. |
-| **Blacksmith** | Gear shop (unique slots; buying replaces equipped items). |
+| **Blacksmith** | Gear shop across **14** slots and **6** quality tiers; buying replaces the slot. |
 
-### Combat systems
+Cabin and walls fully repair at dawn if you survive the night.
 
-- **Auto weapons** — orbiting axes, hatchets, saws, auras, and more; level them via cards.
-- **Unique weapons** — at max level with an element infusion, a weapon awakens into a named unique form.
-- **Elements** — fire, water, nature, earth, light, darkness.
-- **Variants** — necromantic splits on death; demonic leaves a fire pool.
-- **Power-ups** — magnet, fury, regen, haste, rare nuke.
-- **Gear** — blacksmith stock with quality tiers.
+### Player arsenal
+
+- **12 auto weapons** — axe, hatchet, saw, aura, dynamite, pike, crossbow, spikes, hammerfall, longbow, knife, guard dog.
+- Max a weapon (**Lv 8**) and take its **infusion** to awaken a **unique elemental form** (**72** named forms).
+- **20 passives** — damage, speed, armor, regen, crit, dash charges, greed/devil/angel trades, and **6** elemental masteries.
+- **6 power-ups** — magnet, fury, regen, haste, hearts (kill heals), cataclysm nuke.
+- Blacksmith gear: **2** weapon slots, **7** armor, **5** accessories.
+
+### Tutorials & glossary
+
+**11** coach tips can spotlight HUD and world targets each run while Tutorials are On (Options). After a run you can turn them off. The in-menu **Glossary** covers beasts, cards, buildings, and world systems.
 
 ### Meta progress
 
-Credits earned at the end of a run buy **permanent character upgrades** between runs. Progress is saved via Electron `userData` (`forestSave`).
+Credits at end of run buy **15** permanent character upgrades (vitality, damage, rerolls, banishes, walls, towers, smith luck, and more). Saved via Electron `userData` (`forestSave`).
 
 ---
 
@@ -51,12 +94,15 @@ Credits earned at the end of a run buy **permanent character upgrades** between 
 
 | Input | Action |
 |---|---|
-| **WASD** | Move |
+| **WASD** / stick | Move |
 | **Space** / **Shift** | Dash |
-| **B** | Camp / blacksmith panel |
+| **F** | Aim lock (nearest foe) |
+| **U** | Camp build panel |
+| **B** | Blacksmith tab |
 | **1–5** | Pick a level-up card |
-| **Esc** | Pause / resume |
-| **M** | Mute / unmute (menu options) |
+| **Esc** / **P** | Pause / resume |
+| **M** | Mute / unmute |
+| **R** | Reroll cards (when available) |
 
 ---
 
@@ -81,7 +127,7 @@ npm run build:portable
 npm run release         # publish to GitHub (needs GH_TOKEN)
 ```
 
-Outputs under `dist/`. Packaged app loads `dist-web/` (Phaser build). Auto-update via GitHub releases is unchanged.
+Outputs under `dist/`. Packaged app loads `dist-web/` (Phaser build). Auto-update via GitHub releases.
 
 ---
 
@@ -101,16 +147,16 @@ Outputs under `dist/`. Packaged app loads `dist-web/` (Phaser build). Auto-updat
 ├── src/
 │   ├── main.ts             # Phaser boot
 │   ├── scenes/             # Boot, Menu, Run
-│   ├── systems/            # Combat, animals, arsenal, camp, day/night, lighting
-│   ├── data/               # Species, weapons, passives, shop, constants
+│   ├── systems/            # Combat, animals, arsenal, camp, abilities, day/night
+│   ├── data/               # Species, weapons, passives, shop, tutorials, constants
 │   ├── world/              # Procedural world
 │   ├── meta/               # Credits & permanent upgrades
 │   ├── ui/                 # DomUI + overlay.css
 │   └── audio/
-├── electron/               # Main, preload, updater (unchanged bridges)
+├── electron/               # Main, preload, updater
 ├── dist-web/               # Vite production output (Electron loads this)
 ├── legacy/                 # Pre-migration Canvas 2D game (reference only)
-└── package.json            # 0.2.x
+└── package.json
 ```
 
 ---

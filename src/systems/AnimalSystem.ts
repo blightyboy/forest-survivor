@@ -542,11 +542,8 @@ export class AnimalSystem {
       }
       g.fillStyle(0x000000, 0.22);
       g.fillEllipse(a.x, gy, (a.radius + 2) * 2.1, a.radius * 0.76);
-      if (a.element && ELEMENTS[a.element]) {
-        const col = Phaser.Display.Color.HexStringToColor(ELEMENTS[a.element].color).color;
-        g.lineStyle(2.2, col, 0.42);
-        g.strokeEllipse(a.x, gy, a.radius * 2.3, a.radius * 0.84);
-      }
+      // No persistent element ground stroke — in Phaser it reads as a weird circle
+      // around the body (esp. earth tan). Affinity stays on the floating orb.
       if (a.slowT > 0) {
         g.lineStyle(2, 0x4db8ff, 0.35 + a.slow * 0.35);
         g.strokeEllipse(a.x, gy, a.radius * 2.5, a.radius * 0.96);
@@ -1148,6 +1145,14 @@ export class AnimalSystem {
         s.canvas.refresh();
       }
       s.canvas.setPosition(s.x, s.y, Math.floor(s.y) + 12);
+      if (Math.random() < dt * 28) {
+        this.vfx?.trail(s.x, s.y - 8, {
+          color: s.color,
+          strength: 0.7,
+          vx: s.vx,
+          vy: s.vy,
+        });
+      }
       if (s.life <= 0) {
         s.dead = true;
         continue;
@@ -1638,6 +1643,16 @@ export class AnimalSystem {
       b.y += b.vy * dt;
       b.life -= dt;
       b.gfx.setPosition(b.x, b.y).setDepth(Math.floor(b.y) + 12);
+      if (Math.random() < dt * 32) {
+        this.vfx?.trail(b.x, b.y, {
+          element: b.element,
+          color: b.colorHex,
+          strength: 0.95,
+          rich: true,
+          vx: b.vx,
+          vy: b.vy,
+        });
+      }
       if (b.life <= 0) b.dead = true;
       if (player.alive && player.invuln <= 0 && dist2(b.x, b.y, player.x, player.y) < (b.r + 14) ** 2) {
         const dealt = b.dmg * (1 - clamp(player.armor, 0, 0.65));

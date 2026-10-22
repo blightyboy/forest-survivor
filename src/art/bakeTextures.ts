@@ -197,8 +197,9 @@ function bakeWall(scene: Phaser.Scene) {
 
 function bakeBuildings(scene: Phaser.Scene) {
   {
-    const [el, ctx] = canvas(64, 56);
-    ctx.translate(32, 50);
+    // Stones + shadow sit ~10px below the foot origin; keep headroom for the flame.
+    const [el, ctx] = canvas(64, 66);
+    ctx.translate(32, 54);
     drawCampfireBaked(ctx);
     register(scene, 'bld_campfire', el);
   }
