@@ -3,6 +3,8 @@ import { WEAPON_MAX, MAX_WEAPONS } from '../data/constants';
 import {
   WEAPON_DEFS,
   applyUniqueMults,
+  uniqueWeaponName,
+  weaponDrawStyle,
   type WeaponStats,
   type WeaponId,
 } from '../data/weapons';
@@ -15,6 +17,7 @@ import {
   type ArsenalCardState,
 } from '../data/passives';
 import type { RunPlayer } from '../run/RunTypes';
+import { gainResource } from '../run/RunTypes';
 
 export class ArsenalSystem {
   baseMaxHp = 100;
@@ -49,7 +52,46 @@ export class ArsenalSystem {
     if (this.weaponElements[weaponId]) return false;
     this.weaponElements[weaponId] = element;
     this.usedElements[element] = true;
+    // Legacy isUnique: max level + infusion → awaken unique form.
+    if ((this.weapons[weaponId] || 0) >= WEAPON_MAX) {
+      this.weaponUnique[weaponId] = true;
+    }
     return true;
+  }
+
+  /** Legacy Arsenal.isUnique */
+  isUnique(id: string): boolean {
+    return (this.weapons[id] || 0) >= WEAPON_MAX && !!this.weaponElements[id];
+  }
+
+  /** Legacy Arsenal.elementOf */
+  elementOf(id: string) {
+    return this.weaponElements[id] || null;
+  }
+
+  /** Legacy Arsenal.drawStyle — paint kit for projectile art. */
+  drawStyle(id: string, flash = false) {
+    return weaponDrawStyle(this.elementOf(id), this.isUnique(id), flash);
+  }
+
+  /** Legacy Arsenal.fireOpts — attach to spawned projectiles. */
+  fireOpts(id: string) {
+    return {
+      element: this.elementOf(id),
+      unique: this.isUnique(id),
+      style: this.drawStyle(id),
+    };
+  }
+
+  /** Legacy Arsenal.uniqueName — elemental unique title, or null. */
+  uniqueName(id: string): string | null {
+    const el = this.weaponElements[id];
+    return el ? uniqueWeaponName(id, el) : null;
+  }
+
+  /** Legacy Arsenal.displayName — unique title when awakened, else base name. */
+  displayName(id: string): string {
+    return this.uniqueName(id) || WEAPON_DEFS[id as WeaponId]?.name || id;
   }
 
   getWeaponStats(id: string): WeaponStats | null {
@@ -58,7 +100,11 @@ export class ArsenalSystem {
     const def = WEAPON_DEFS[id as WeaponId];
     if (!def) return null;
     let stats = { ...def.stats(l) };
-    if (this.weaponUnique[id]) stats = applyUniqueMults(stats, id);
+    // Prefer computed uniqueness so element-on-max awakens without stale flags.
+    if (this.isUnique(id)) {
+      this.weaponUnique[id] = true;
+      stats = applyUniqueMults(stats, id);
+    }
     return stats;
   }
 
@@ -72,7 +118,8 @@ export class ArsenalSystem {
     };
   }
 
-  rollCards(n = 3): LevelUpCard[] {
+  /** Legacy offers 5 cards per level-up (cardOptions(5, banished)). */
+  rollCards(n = 5): LevelUpCard[] {
     return levelUpCardOptions(n, this.cardState(), this.banished);
   }
 
@@ -95,7 +142,7 @@ export class ArsenalSystem {
       return true;
     }
     if (card.kind === 'bonus') {
-      if (card.id === 'gold') player.gold += 25;
+      if (card.id === 'gold') gainResource(player, 'gold', 25);
       if (card.id === 'heal') player.hp = player.maxHp;
       return true;
     }
@@ -137,15 +184,14 @@ export class ArsenalSystem {
     return 1 + (this.passives.area || 0) * 0.1;
   }
 
+  /** Attack-speed divisor approximation for UI; combat uses legacy cooldownMult. */
   passiveHaste(): number {
-    return 1 + (this.passives.haste || 0) * 0.07;
+    return 1 / Math.pow(0.93, this.passives.haste || 0);
   }
 
+  /** Flat vitality/angel only — full maxHp (incl. +10/level) is computed in recomputePlayerStats. */
   passiveMaxHpBonus(): number {
-    let hp = (this.passives.vitality || 0) * 25 + (this.passives.angel || 0) * 30;
-    hp -= (this.passives.greed || 0) * 0.08 * 100;
-    hp -= (this.passives.devil || 0) * 0.1 * 100;
-    return hp;
+    return (this.passives.vitality || 0) * 25 + (this.passives.angel || 0) * 30;
   }
 
   elementMasteryBonus(element: ElementId | null | undefined): number {
@@ -158,21 +204,25 @@ export class ArsenalSystem {
     return 1 + lv * 0.36;
   }
 
+  /**
+   * Dash charges only. Combat stats (armor/crit/might/…) are owned by
+   * `recomputePlayerStats` — writing them here wiped equipped gear bonuses.
+   */
   applyPassiveBonuses(player: RunPlayer) {
-    const prevMax = player.maxHp;
-    player.maxHp = Math.max(20, this.baseMaxHp + this.passiveMaxHpBonus());
-    player.hp = Math.min(player.maxHp, player.hp + Math.max(0, player.maxHp - prevMax));
-    player.armor = this.passiveArmor();
-    player.regen = this.passiveRegen();
-    player.crit = this.passiveCrit();
-    player.moveMult = 1 + this.passiveMoveBonus();
-    player.damageMult = this.passiveDamageBonus();
-    player.dashCharges = 1 + (this.passives.dash || 0);
+    this.setDashCharges(player, 1 + (this.passives.dash || 0));
   }
 
   applyMetaRunStart(player: RunPlayer, metaBonuses: { rerolls?: number; banishes?: number }) {
-    player.rerollsLeft = metaBonuses.rerolls || 0;
-    player.banishesLeft = metaBonuses.banishes || 0;
-    player.dashCharges = 1 + (this.passives.dash || 0);
+    player.rerollsLeft = 5 + (metaBonuses.rerolls || 0);
+    player.banishesLeft = 5 + (metaBonuses.banishes || 0);
+    this.setDashCharges(player, 1 + (this.passives.dash || 0));
+  }
+
+  /** Legacy Player.setDashCharges — grow max without wiping available charges. */
+  setDashCharges(player: RunPlayer, max: number) {
+    const m = Math.max(1, max | 0);
+    if (m > player.dashMax) player.dashCharges += m - player.dashMax;
+    player.dashMax = m;
+    player.dashCharges = Math.max(0, Math.min(player.dashCharges, player.dashMax));
   }
 }

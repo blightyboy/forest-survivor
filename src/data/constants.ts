@@ -1,3 +1,5 @@
+import { clamp } from '../core/math';
+
 export const WORLD_SIZE = 4800;
 export const WORLD_SEED = 20261020;
 export const WORLD_MARGIN = 100;
@@ -6,14 +8,23 @@ export const PHASE_DUSK = 0.6;
 export const PHASE_NIGHT = 0.68;
 export const PHASE_DAWN = 0.95;
 export const CLOCK_OFFSET = DAY_LENGTH * 0.05;
-export const NIGHT_DARKNESS = 0.75;
+export const NIGHT_DARKNESS = 0.8;
 export const RAID_DISTANCE = 1050;
 export const HIT_COOLDOWN = 0.3;
 export const MAX_PICKUPS = 160;
 export const WEAPON_MAX = 8;
 export const MAX_WEAPONS = 5;
 export const STAR_MAX = 15;
-export const STAR_LOOT = 0.08;
+export const STAR_TIER_SIZE = 5;
+/** Per-rank bonuses stacked on enemy base stats (legacy elements.js). */
+export const STAR_HP = 0.17;
+export const STAR_DMG = 0.11;
+export const STAR_SPEED = 0.028;
+export const STAR_XP = 0.55;
+/** Per-star loot multiplier contribution (legacy STAR_LOOT). */
+export const STAR_LOOT = 0.32;
+
+export type StarTier = 'bronze' | 'silver' | 'gold';
 
 export const RES_LABEL: Record<string, string> = { wood: 'Wood', meat: 'Meat', gold: 'Gold' };
 
@@ -134,10 +145,112 @@ export const ELEMENTS: Record<string, { id: string; name: string; color: string;
   darkness: { id: 'darkness', name: 'Darkness', color: '#9b7bde', glow: 'rgba(155,123,222,0.55)', opposite: 'light' },
 };
 
+/** Weapon infusion cards — one element per weapon. Effects stack and scale with damage. */
+export const ELEMENT_INFUSE: Record<ElementId, { name: string; effect: string }> = {
+  fire: { name: 'Ember Infusion', effect: 'Burns enemies (DoT scales with damage)' },
+  water: { name: 'Tide Infusion', effect: 'Slows enemies (strength scales with damage)' },
+  nature: { name: 'Bloom Infusion', effect: 'Heal on kill (scales with damage)' },
+  earth: { name: 'Quake Infusion', effect: 'On kill: AoE for 10% of damage dealt' },
+  light: { name: 'Radiant Infusion', effect: '2% chance on kill: permanently raise max HP' },
+  darkness: { name: 'Umbral Infusion', effect: '2% chance on kill: permanently raise damage' },
+};
+
+/** Legacy affinity: strong opposite 1.55, same-element resist 0.65. */
 export function elementMult(atk: string | null, def: string | null) {
-  if (!atk || !def) return 1;
-  if (ELEMENTS[atk]?.opposite === def) return 1.35;
-  if (ELEMENTS[def]?.opposite === atk) return 0.7;
-  if (atk === def) return 0.85;
+  if (!atk || !def || !ELEMENTS[atk] || !ELEMENTS[def]) return 1;
+  if (ELEMENTS[atk].opposite === def) return 1.55;
+  if (atk === def) return 0.65;
   return 1;
+}
+
+/** True boss every 3rd night (nights 3, 6, 9…). Nights 1–2 are miniboss. */
+export function isBossNight(day: number) {
+  return day > 0 && day % 3 === 0;
+}
+
+export function starTierInfo(stars: number): {
+  tier: StarTier | null;
+  count: number;
+  fill: string | null;
+  stroke: string | null;
+} {
+  const n = clamp(stars | 0, 0, STAR_MAX);
+  if (n <= 0) return { tier: null, count: 0, fill: null, stroke: null };
+  if (n <= STAR_TIER_SIZE) {
+    return { tier: 'bronze', count: n, fill: '#c47a3a', stroke: '#5a3010' };
+  }
+  if (n <= STAR_TIER_SIZE * 2) {
+    return { tier: 'silver', count: n - STAR_TIER_SIZE, fill: '#d8dee8', stroke: '#4a5568' };
+  }
+  return { tier: 'gold', count: n - STAR_TIER_SIZE * 2, fill: '#ffe066', stroke: '#8a5d00' };
+}
+
+export function starMult(stars: number) {
+  const n = clamp(stars | 0, 0, STAR_MAX);
+  return {
+    hp: 1 + n * STAR_HP,
+    dmg: 1 + n * STAR_DMG,
+    speed: 1 + n * STAR_SPEED,
+    xp: 1 + n * STAR_XP,
+    loot: 1 + n * STAR_LOOT,
+  };
+}
+
+/** Roll 0–15 veterancy ranks from threat (legacy rollStars). */
+export function rollStars(
+  threatM: number,
+  opts: { boss?: boolean; big?: boolean; raider?: boolean; swarm?: boolean; passive?: boolean } = {},
+) {
+  if (opts.passive) return 0;
+  const m = Math.max(0, threatM || 0);
+  let bias = m * 0.85 + (opts.boss ? 2.8 : 0) + (opts.big ? 0.7 : 0) + (opts.raider ? 0.55 : 0);
+  if (opts.swarm) bias *= 0.4;
+
+  let max: number;
+  if (opts.swarm) {
+    max = Math.min(STAR_TIER_SIZE, 1 + Math.floor(m / 3.5));
+  } else if (opts.boss) {
+    max = Math.min(STAR_MAX, 3 + Math.floor(m / 1.15));
+  } else {
+    max = Math.min(STAR_MAX, 1 + Math.floor(m / 0.95));
+  }
+
+  let stars = 0;
+  for (let s = 1; s <= max; s++) {
+    const tierPenalty = s <= 5 ? 0 : s <= 10 ? 0.04 : 0.07;
+    const chance = clamp(
+      0.15 + bias * 0.095 - s * (0.055 - Math.min(0.03, m * 0.002)) - tierPenalty,
+      0.03,
+      0.8,
+    );
+    if (Math.random() < chance) stars = s;
+    else break;
+  }
+
+  if (opts.boss) {
+    stars = Math.max(stars, Math.min(STAR_MAX, 2 + Math.floor(m / 1.9)));
+  }
+  if (!opts.boss && !opts.swarm && m >= 8 && stars === 0 && Math.random() < clamp((m - 8) * 0.08, 0, 0.55)) {
+    stars = 1;
+  }
+  if (!opts.boss && !opts.swarm && m >= 14 && stars < 4 && Math.random() < clamp((m - 14) * 0.06, 0, 0.45)) {
+    stars = Math.max(stars, 4);
+  }
+  return clamp(stars, 0, STAR_MAX);
+}
+
+/** Roll an elemental affinity for enemies (legacy rollEnemyElement). */
+export function rollEnemyElement(opts: {
+  boss?: boolean;
+  raider?: boolean;
+  swarm?: boolean;
+  passive?: boolean;
+  threatM?: number;
+} = {}): ElementId | null {
+  if (opts.passive && Math.random() > 0.35) return null;
+  if (opts.swarm && Math.random() > 0.55) return null;
+  if (!opts.boss && !opts.raider && Math.random() > 0.42 + Math.min(0.35, (opts.threatM || 0) * 0.04)) {
+    return null;
+  }
+  return ELEMENT_IDS[Math.floor(Math.random() * ELEMENT_IDS.length)];
 }

@@ -16,15 +16,29 @@ export interface RunPlayer {
   wood: number;
   meat: number;
   gold: number;
+  /** Lifetime tallies for end-of-run credits (not current inventory). */
+  treesChopped: number;
+  woodCollected: number;
+  meatCollected: number;
+  goldCollected: number;
+  campUpgrades: number;
   kills: number;
   bosses: number;
   raidsSurvived: number;
   aimAngle: number;
   alive: boolean;
   dashCharges: number;
+  dashMax: number;
   dashCd: number;
-  dashBoost: number;
+  dashCdMax: number;
+  /** Active dash lunge timer (legacy dashT). */
+  dashT: number;
   invuln: number;
+  /** Player slow from enemy gloom / breath (0–1). */
+  slow: number;
+  slowT: number;
+  /** Nature poison DoT stacks from enemy abilities. */
+  poisons: { dps: number; life: number }[];
   magnetR: number;
   damageMult: number;
   flatDamage: number;
@@ -39,6 +53,16 @@ export interface RunPlayer {
   gearArea?: number;
   gearLifesteal?: number;
   gearXpGain?: number;
+  /** Flat reflect damage on being hit (legacy ps.thorns). */
+  thorns?: number;
+  /** Meta elemental flat added when attack has an element. */
+  elemFlat?: number;
+  /** Attack element from gear (legacy ps.attackElement) — mainWeapon first. */
+  attackElement: ElementId | null;
+  /** Per-element damage bonuses from gear + meta + mastery. */
+  elementPower: Partial<Record<ElementId, number>>;
+  /** Per-element damage resist from gear. */
+  elementResist: Partial<Record<ElementId, number>>;
   buffFury: number;
   buffVital: number;
   buffHaste: number;
@@ -53,6 +77,20 @@ export interface RunStats {
   bosses: number;
 }
 
+/** Apply a resource gain and tally it for end-of-run credits. */
+export function gainResource(
+  player: RunPlayer,
+  kind: 'wood' | 'meat' | 'gold',
+  amount: number,
+) {
+  const n = Math.max(0, Math.round(amount));
+  if (n <= 0) return;
+  player[kind] += n;
+  if (kind === 'wood') player.woodCollected += n;
+  else if (kind === 'meat') player.meatCollected += n;
+  else player.goldCollected += n;
+}
+
 export interface Pickup {
   kind: PickupKind;
   x: number;
@@ -60,10 +98,17 @@ export interface Pickup {
   amount: number;
   vx: number;
   vy: number;
+  /** Bounce height (legacy-style hop, not world fall). */
+  z: number;
+  vz: number;
+  age: number;
+  rot: number;
+  phase: number;
   dead: boolean;
   /** POWERUPS id when kind === 'powerup' */
   powerupId?: string;
   magnet?: boolean;
+  speed?: number;
 }
 
 export interface FirePool {

@@ -19,7 +19,13 @@ export class DayNightSystem {
   phase: DayPhase = 'day';
   darkness = 0;
 
+  /** Legacy game.isNight — true only during the night phase (not dusk/dawn). */
   get isNight() {
+    return this.phase === 'night';
+  }
+
+  /** Dusk or night — used for lighting / “night-like” UI. */
+  get isNightLike() {
     return this.phase === 'night' || this.phase === 'dusk';
   }
 
@@ -48,14 +54,27 @@ export class DayNightSystem {
     }
     this.darkness = clamp(dark, 0, NIGHT_DARKNESS);
     const wasNightLike = prevPhase === 'night' || prevPhase === 'dusk';
+    const nowNightLike = this.phase === 'night' || this.phase === 'dusk';
     const nowDayLike = this.phase === 'day' || this.phase === 'dawn';
-    const leftNight = wasNightLike && nowDayLike && this.dayNumber === prevDay;
+    const leftNight = wasNightLike && nowDayLike;
     return {
       newDay: this.dayNumber > prevDay,
-      enteredNight: this.phase === 'night' && cycle < PHASE_NIGHT + 0.02,
+      enteredDusk: prevPhase !== 'dusk' && this.phase === 'dusk',
+      enteredNight: prevPhase !== 'night' && this.phase === 'night',
       leftNight,
-      dawn: this.phase === 'dawn',
+      dawn: prevPhase !== 'dawn' && this.phase === 'dawn',
+      phaseChanged: prevPhase !== this.phase,
     };
+  }
+
+  /** 0..1 progress through the daylight portion of the cycle (for day bar). */
+  dayBarFrac() {
+    if (this.clock < PHASE_DUSK) return this.clock / PHASE_DUSK;
+    if (this.clock < PHASE_NIGHT) {
+      return 1 - (this.clock - PHASE_DUSK) / (PHASE_NIGHT - PHASE_DUSK) * 0.15;
+    }
+    if (this.clock < PHASE_DAWN) return 0;
+    return (this.clock - PHASE_DAWN) / (1 - PHASE_DAWN);
   }
 
   formatClock() {

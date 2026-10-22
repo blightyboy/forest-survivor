@@ -154,15 +154,18 @@ function applyDisplaySettings(settings) {
     return { ok: true, ...getDisplayState() };
   }
 
-  // Windowed
+  // Windowed — unmaximize first so setBounds actually changes the client size.
   win.setResizable(true);
-  const maxW = display.workAreaSize.width;
-  const maxH = display.workAreaSize.height;
-  const w = Math.min(width, maxW);
-  const h = Math.min(height, maxH);
+  if (win.isMaximized()) win.unmaximize();
+  const work = display.workArea;
+  const maxW = work.width;
+  const maxH = work.height;
+  const w = Math.min(Math.max(900, width), maxW);
+  const h = Math.min(Math.max(560, height), maxH);
   windowedBounds = { width: w, height: h };
-  win.setSize(w, h);
-  win.center();
+  const x = work.x + Math.max(0, Math.floor((maxW - w) / 2));
+  const y = work.y + Math.max(0, Math.floor((maxH - h) / 2));
+  win.setBounds({ x, y, width: w, height: h });
   return { ok: true, ...getDisplayState() };
 }
 
@@ -192,7 +195,7 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 
   // Phaser 3 + Vite: dev server in development, dist-web in production.
-  const isDev = !app.isPackaged && process.env.JUNGLE_VITE !== '0';
+  const isDev = !app.isPackaged && process.env.FOREST_VITE !== '0';
   if (isDev) {
     const viteUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/';
     win.loadURL(viteUrl).catch((err) => {
@@ -216,7 +219,7 @@ function createWindow() {
     if (mainWindow === win) mainWindow = null;
   });
 
-  if (!app.isPackaged && process.env.JUNGLE_DEVTOOLS === '1') {
+  if (!app.isPackaged && process.env.FOREST_DEVTOOLS === '1') {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 }

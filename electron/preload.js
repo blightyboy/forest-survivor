@@ -3,7 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 /** File-backed save API for the packaged / Electron desktop build. */
-contextBridge.exposeInMainWorld('jungleSave', {
+contextBridge.exposeInMainWorld('forestSave', {
   load() {
     return ipcRenderer.sendSync('save:load');
   },
@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('jungleSave', {
 });
 
 /** Display / window controls (Electron only). */
-contextBridge.exposeInMainWorld('jungleDisplay', {
+contextBridge.exposeInMainWorld('forestDisplay', {
   list() {
     return ipcRenderer.sendSync('display:list');
   },
@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld('jungleDisplay', {
 });
 
 /** GitHub release auto-update (packaged builds). */
-contextBridge.exposeInMainWorld('jungleUpdate', {
+contextBridge.exposeInMainWorld('forestUpdate', {
   available: true,
   check() {
     return ipcRenderer.invoke('update:check');

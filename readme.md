@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.2.0-alpha-build`
+Version: `0.2.1-alpha-build`
 
 A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + Vite, packaged with Electron. Play as a lumberjack in a hostile forest: chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids.
 
@@ -43,7 +43,7 @@ Threat grows over time. Beasts gain **veterancy stars** and sometimes **elements
 
 ### Meta progress
 
-Credits earned at the end of a run buy **permanent character upgrades** between runs. Progress is saved via Electron `userData` (`jungleSave`).
+Credits earned at the end of a run buy **permanent character upgrades** between runs. Progress is saved via Electron `userData` (`forestSave`).
 
 ---
 

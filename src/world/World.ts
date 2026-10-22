@@ -1,7 +1,11 @@
-import { RNG, SpatialGrid, fbm, dist2, TAU } from '../core/math';
+import { RNG, SpatialGrid, fbm, dist2, TAU, clamp } from '../core/math';
 import { WORLD_SIZE, WORLD_SEED, WORLD_MARGIN } from '../data/constants';
 
 export type TreeKind = 'oak' | 'pine';
+/** Legacy tree lifecycle: alive → falling → stump → growing → alive. */
+export type TreeState = 'alive' | 'falling' | 'stump' | 'growing';
+
+export const TREE_FALL_TIME = 0.75;
 
 export class Tree {
   readonly type = 'tree';
@@ -15,7 +19,12 @@ export class Tree {
   maxHp: number;
   hp: number;
   wood: number;
-  dead = false;
+  state: TreeState = 'alive';
+  fallT = 0;
+  fallDir = 1;
+  /** Seconds until stump tries to regrow (legacy 35–55). */
+  regrow = 0;
+  growT = 1;
 
   constructor(x: number, y: number, _rng: RNG, kind: TreeKind, size: number, indestructible = false) {
     this.x = x;
@@ -30,12 +39,17 @@ export class Tree {
     this.wood = size < 0.95 ? 2 : size < 1.2 ? 3 : 5;
   }
 
+  /** True when the tree is down (stump / falling) — not grown back yet. */
+  get dead() {
+    return this.state === 'falling' || this.state === 'stump';
+  }
+
   isSolid() {
-    return !this.dead;
+    return this.state === 'alive' || this.state === 'growing';
   }
 
   isHittable() {
-    return !this.dead && !this.indestructible;
+    return this.state === 'alive' && !this.indestructible;
   }
 }
 
@@ -45,17 +59,20 @@ export class Rock {
   y: number;
   ore: boolean;
   size: number;
+  /** Baked texture variant index 0..5. */
+  variant: number;
   radius: number;
   solidR: number;
   maxHp: number;
   hp: number;
   dead = false;
 
-  constructor(x: number, y: number, _rng: RNG, ore: boolean, size: number) {
+  constructor(x: number, y: number, rng: RNG, ore: boolean, size: number) {
     this.x = x;
     this.y = y;
     this.ore = ore;
     this.size = size;
+    this.variant = rng.int(0, 5);
     const r = 15 * size;
     this.radius = r + 3;
     this.solidR = r * 0.85;
@@ -77,12 +94,17 @@ export class Bush {
   x: number;
   y: number;
   size: number;
+  /** Baked texture variant index 0..4. */
+  variant: number;
   radius: number;
+  /** Legacy rustle amount when the player brushes past (0–1). */
+  wobble = 0;
 
-  constructor(x: number, y: number, _rng: RNG, size: number) {
+  constructor(x: number, y: number, rng: RNG, size: number) {
     this.x = x;
     this.y = y;
     this.size = size;
+    this.variant = rng.int(0, 4);
     this.radius = 16 * size;
   }
 }
@@ -168,13 +190,66 @@ export class World {
     return Math.max(1, base);
   }
 
-  damageTree(tree: Tree, amount: number): HarvestResult {
+  damageTree(tree: Tree, amount: number, hitX?: number): HarvestResult {
     if (!tree.isHittable()) return { killed: false };
     tree.hp -= amount;
     if (tree.hp > 0) return { killed: false };
     tree.hp = 0;
-    tree.dead = true;
+    tree.state = 'falling';
+    tree.fallT = 0;
+    tree.fallDir = hitX != null && hitX < tree.x ? 1 : -1;
+    tree.growT = 1;
     return { killed: true, wood: this.treeWoodYield(tree) };
+  }
+
+  /**
+   * Legacy tree update: fall → stump → wait → grow when player is far enough.
+   * Also decays bush rustle wobble (player brush is applied from RunScene).
+   */
+  updateTrees(dt: number, playerX: number, playerY: number) {
+    for (const tree of this.trees) {
+      if (tree.indestructible) continue;
+      if (tree.state === 'falling') {
+        tree.fallT += dt;
+        if (tree.fallT >= TREE_FALL_TIME) {
+          tree.state = 'stump';
+          tree.regrow = 35 + Math.random() * 20;
+        }
+      } else if (tree.state === 'stump') {
+        tree.regrow -= dt;
+        if (tree.regrow <= 0) {
+          if (dist2(playerX, playerY, tree.x, tree.y) > 150 * 150) {
+            tree.state = 'growing';
+            tree.growT = 0;
+            tree.hp = tree.maxHp;
+          } else {
+            // Player still nearby — retry shortly (legacy).
+            tree.regrow = 2;
+          }
+        }
+      } else if (tree.state === 'growing') {
+        tree.growT += dt / 1.1;
+        if (tree.growT >= 1) {
+          tree.growT = 1;
+          tree.state = 'alive';
+        }
+      }
+    }
+    for (const b of this.bushes) {
+      if (b.wobble > 0) b.wobble = Math.max(0, b.wobble - dt * 1.8);
+    }
+  }
+
+  /** Legacy bush rustle when the player walks through foliage. */
+  rustleBushes(playerX: number, playerY: number, playerRadius: number, moving: boolean) {
+    if (!moving) return;
+    const q: Bush[] = [];
+    this.bushGrid.query(playerX, playerY, 60, q);
+    for (let i = 0; i < q.length; i++) {
+      const b = q[i];
+      const rr = 16 * b.size + playerRadius;
+      if (dist2(playerX, playerY, b.x, b.y) < rr * rr) b.wobble = 1;
+    }
   }
 
   damageRock(rock: Rock, amount: number, goldRoll = Math.random()): HarvestResult {
@@ -311,5 +386,60 @@ export class World {
       if (dist2(x, y, o.x, o.y) < rr * rr) return false;
     }
     return true;
+  }
+
+  /** Moves a circular entity and pushes it out of solid static objects (trees/rocks). */
+  moveEntity(e: { x: number; y: number }, r: number) {
+    const q = this._q;
+    for (let iter = 0; iter < 2; iter++) {
+      q.length = 0;
+      this.staticGrid.query(e.x, e.y, r + 40, q);
+      let pushed = false;
+      for (let i = 0; i < q.length; i++) {
+        const o = q[i];
+        if (!o.isSolid()) continue;
+        const rr = r + o.solidR;
+        let ox = e.x - o.x;
+        let oy = e.y - o.y;
+        const d2v = ox * ox + oy * oy;
+        if (d2v >= rr * rr) continue;
+        let d = Math.sqrt(d2v);
+        if (d < 0.001) {
+          ox = 1;
+          oy = 0;
+          d = 1;
+        }
+        const push = rr - d;
+        e.x += (ox / d) * push;
+        e.y += (oy / d) * push;
+        pushed = true;
+      }
+      if (!pushed) break;
+    }
+    e.x = clamp(e.x, WORLD_MARGIN + r, this.w - WORLD_MARGIN - r);
+    e.y = clamp(e.y, WORLD_MARGIN + r, this.h - WORLD_MARGIN - r);
+  }
+
+  /**
+   * Find a free spawn near (px,py). Optional `ok` filter rejects spots (e.g. inside camp).
+   */
+  findSpawnSpot(
+    px: number,
+    py: number,
+    minD: number,
+    maxD: number,
+    r: number,
+    ok?: (x: number, y: number) => boolean,
+  ): { x: number; y: number } | null {
+    for (let i = 0; i < 40; i++) {
+      const a = Math.random() * TAU;
+      const d = minD + Math.random() * (maxD - minD);
+      const x = px + Math.cos(a) * d;
+      const y = py + Math.sin(a) * d;
+      if (!this.isFree(x, y, r)) continue;
+      if (ok && !ok(x, y)) continue;
+      return { x, y };
+    }
+    return null;
   }
 }

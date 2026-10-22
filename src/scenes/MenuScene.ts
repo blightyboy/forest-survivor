@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { DomUI } from '../ui/DomUI';
 import { meta } from '../meta/Meta';
 import { Audio } from '../audio/Audio';
+import { Music } from '../audio/Music';
+import { settings } from '../meta/Settings';
 
 export class MenuScene extends Phaser.Scene {
   ui!: DomUI;
@@ -13,6 +15,13 @@ export class MenuScene extends Phaser.Scene {
   create() {
     this.ui = new DomUI();
     this.wireMenu();
+    Audio.unlock();
+    Music.setVolume(settings.musicVolume);
+    Music.sync({ state: 'menu' });
+  }
+
+  update() {
+    Music.sync({ state: 'menu' });
   }
 
   wireMenu() {
@@ -25,17 +34,12 @@ export class MenuScene extends Phaser.Scene {
       this.scene.start('RunScene');
     };
     ui.onMenuMeta = () => {
-      ui.showMetaMenu(meta, () => ui.showMainMenu(Audio.muted));
-    };
-    ui.onMenuMute = () => {
-      Audio.setMuted(!Audio.muted);
-      ui.showMainMenu(Audio.muted);
+      ui.showMetaMenu(meta);
     };
     ui.onMenuQuit = () => {
-      if (window.jungleSave?.quit) window.jungleSave.quit();
+      if (window.forestSave?.quit) window.forestSave.quit();
       else window.close();
     };
     ui.showMainMenu(Audio.muted);
-    ui.setTip('WASD move · Shift/Space dash · Esc pause · B camp shop');
   }
 }

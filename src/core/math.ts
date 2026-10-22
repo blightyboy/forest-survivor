@@ -1,5 +1,5 @@
 export const TAU = Math.PI * 2;
-export const BUILD_VERSION = '0.2.0-alpha-build';
+export const BUILD_VERSION = '0.2.1-alpha-build';
 
 export function clamp(v: number, min: number, max: number) {
   return v < min ? min : v > max ? max : v;
@@ -57,11 +57,31 @@ export class RNG {
   pick<T>(arr: T[]) { return arr[Math.floor(this.rand() * arr.length)]; }
 }
 
-function hash2(x: number, y: number, seed: number) {
+export function hash2(x: number, y: number, seed: number) {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(seed | 0, 1274126177);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
+}
+
+export type Rgb = { r: number; g: number; b: number };
+export function hexToRgb(hex: string): Rgb {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+export function mixRgb(a: Rgb, b: Rgb, t: number): Rgb {
+  return {
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t,
+  };
+}
+export function rgbStr(c: Rgb) {
+  return `rgb(${c.r | 0},${c.g | 0},${c.b | 0})`;
 }
 function smoothstep01(t: number) { return t * t * (3 - 2 * t); }
 function valueNoise(x: number, y: number, seed: number) {

@@ -230,6 +230,58 @@ export const ELEMENT_WEAPON_STYLE: Record<ElementId, ElementWeaponStyle> = {
   darkness: { metal: '#b89ae8', wood: '#2a1a3a', accent: '#e0d0ff', glow: 'rgba(155,123,222,0.55)', trail: '#9b7bde' },
 };
 
+export type WeaponDrawStyle = {
+  metal: string;
+  wood: string;
+  accent: string;
+  glow: string | null;
+  trail: string | null;
+  unique: boolean;
+  scale: number;
+};
+
+/** Legacy weaponDrawStyle — paint kit + unique scale for projectile art. */
+export function weaponDrawStyle(
+  element: ElementId | string | null | undefined,
+  unique: boolean,
+  flash = false,
+): WeaponDrawStyle {
+  if (flash) {
+    return { metal: '#fff', wood: '#fff', accent: '#fff', glow: null, trail: '#fff', unique: false, scale: 1 };
+  }
+  if (unique && element && ELEMENT_WEAPON_STYLE[element as ElementId]) {
+    const s = ELEMENT_WEAPON_STYLE[element as ElementId];
+    return {
+      metal: s.metal,
+      wood: s.wood,
+      accent: s.accent,
+      glow: s.glow,
+      trail: s.trail,
+      unique: true,
+      scale: 1.12,
+    };
+  }
+  return {
+    metal: '#c3ced6',
+    wood: '#9a6232',
+    accent: '#e9eef2',
+    glow: null,
+    trail: null,
+    unique: false,
+    scale: 1,
+  };
+}
+
+/** Legacy hexRgba — convert #rrggbb to rgba() for trail strokes. */
+export function hexRgba(hex: string, a: number) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length < 6) return `rgba(255,255,255,${a})`;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
 /** Flat unique-form multipliers applied on top of max-level stats. */
 export const UNIQUE_STAT_MULT = {
   dmg: 1.3,

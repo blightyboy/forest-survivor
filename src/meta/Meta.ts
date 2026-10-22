@@ -1,6 +1,8 @@
 import { clamp } from '../core/math';
 
-const META_STORAGE_KEY = 'jungleSurvival_meta_v1';
+const META_STORAGE_KEY = 'forestSurvivor_meta_v1';
+/** Pre-rename key — migrate once so older Electron installs keep progress. */
+const LEGACY_META_STORAGE_KEY = 'jungleSurvival_meta_v1';
 
 function metaSnapshot(meta: MetaProgress) {
   return {
@@ -13,9 +15,9 @@ function metaSnapshot(meta: MetaProgress) {
 }
 
 function readMetaRaw(): Record<string, unknown> | null {
-  if (typeof window !== 'undefined' && window.jungleSave) {
+  if (typeof window !== 'undefined' && window.forestSave) {
     try {
-      const fileData = window.jungleSave.load();
+      const fileData = window.forestSave.load();
       if (fileData && typeof fileData === 'object') return fileData;
     } catch {
       /* fall through */
@@ -24,7 +26,7 @@ function readMetaRaw(): Record<string, unknown> | null {
       const legacy = localStorage.getItem(META_STORAGE_KEY);
       if (legacy) {
         const data = JSON.parse(legacy) as Record<string, unknown>;
-        window.jungleSave.save(data);
+        window.forestSave.save(data);
         return data;
       }
     } catch {
@@ -33,17 +35,28 @@ function readMetaRaw(): Record<string, unknown> | null {
     return null;
   }
   try {
-    const raw = localStorage.getItem(META_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+    const raw =
+      localStorage.getItem(META_STORAGE_KEY) || localStorage.getItem(LEGACY_META_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    // Promote legacy key when found.
+    if (!localStorage.getItem(META_STORAGE_KEY) && localStorage.getItem(LEGACY_META_STORAGE_KEY)) {
+      try {
+        localStorage.setItem(META_STORAGE_KEY, raw);
+      } catch {
+        /* ignore */
+      }
+    }
+    return data;
   } catch {
     return null;
   }
 }
 
 function writeMetaRaw(data: Record<string, unknown>) {
-  if (typeof window !== 'undefined' && window.jungleSave) {
+  if (typeof window !== 'undefined' && window.forestSave) {
     try {
-      window.jungleSave.save(data);
+      window.forestSave.save(data);
       return;
     } catch {
       /* fall through */
@@ -143,22 +156,65 @@ export function computeMetaBonuses(levels: Record<string, number>): MetaBonuses 
   return out;
 }
 
-export function calcRunCredits(stats: {
+export type RunCreditStats = {
   day?: number;
   level?: number;
   kills?: number;
   raids?: number;
   bosses?: number;
   time?: number;
-}) {
-  const day = stats.day || 1;
-  const level = stats.level || 1;
-  const kills = stats.kills || 0;
-  const raids = stats.raids || 0;
-  const bosses = stats.bosses || 0;
-  const time = stats.time || 0;
-  const raw = day * 10 + level * 4 + kills * 0.2 + raids * 15 + bosses * 40 + time / 8;
-  return Math.max(5, Math.floor(raw));
+  /** Trees felled during the run. */
+  trees?: number;
+  /** Lifetime resources collected (not ending inventory). */
+  wood?: number;
+  meat?: number;
+  gold?: number;
+  /** Cabin upgrade level (`camp` structure). */
+  campLevel?: number;
+  /** Number of camp upgrades purchased. */
+  campUpgrades?: number;
+  /** Sum of all camp structure levels (development). */
+  campDev?: number;
+};
+
+/**
+ * Credits awarded at the end of a run.
+ * Weights survival (day/time), combat (kills/raids/bosses), foraging (trees/resources),
+ * and fortification (cabin level + camp development).
+ */
+export function calcRunCredits(stats: RunCreditStats) {
+  const day = Math.max(1, stats.day || 1);
+  const level = Math.max(1, stats.level || 1);
+  const kills = Math.max(0, stats.kills || 0);
+  const raids = Math.max(0, stats.raids || 0);
+  const bosses = Math.max(0, stats.bosses || 0);
+  const time = Math.max(0, stats.time || 0);
+  const trees = Math.max(0, stats.trees || 0);
+  const wood = Math.max(0, stats.wood || 0);
+  const meat = Math.max(0, stats.meat || 0);
+  const gold = Math.max(0, stats.gold || 0);
+  const campLevel = Math.max(0, stats.campLevel || 0);
+  const campUpgrades = Math.max(0, stats.campUpgrades || 0);
+  const campDev = Math.max(0, stats.campDev ?? campUpgrades);
+
+  // Soft-scale resource piles so long farms reward effort without exploding payouts.
+  const resourceScore =
+    Math.sqrt(wood) * 1.15 + Math.sqrt(meat) * 1.55 + Math.sqrt(gold) * 2.35;
+
+  const raw =
+    day * 12 +
+    level * 5 +
+    time / 10 +
+    kills * 0.28 +
+    trees * 0.4 +
+    resourceScore +
+    raids * 18 +
+    bosses * 45 +
+    campLevel * 10 +
+    campDev * 2.5 +
+    campUpgrades * 1.5;
+
+  return Math.max(8, Math.floor(raw));
 }
 
 export class MetaProgress {
@@ -220,6 +276,29 @@ export class MetaProgress {
 
   buy(id: MetaUpgradeId) {
     return buyMetaUpgrade(this, id);
+  }
+
+  /** Total credits spent on the current permanent upgrade levels. */
+  spentOnUpgrades() {
+    let total = 0;
+    for (const u of META_UPGRADES) {
+      const lv = this.levels[u.id] || 0;
+      for (let i = 0; i < lv; i++) total += metaUpgradeCost(u, i);
+    }
+    return total;
+  }
+
+  /**
+   * Reset every permanent upgrade and refund all credits spent.
+   * Returns the amount refunded (0 if nothing to refund).
+   */
+  refundAll() {
+    const refund = this.spentOnUpgrades();
+    if (refund <= 0) return 0;
+    this.credits += refund;
+    this.levels = emptyMetaLevels();
+    this.save();
+    return refund;
   }
 
   completeRun(stats: Parameters<typeof calcRunCredits>[0]) {
