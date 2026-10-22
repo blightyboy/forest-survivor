@@ -1,8 +1,14 @@
 import { clamp } from '../core/math';
 
 export const WORLD_SIZE = 4800;
+/** Fixed seed used only for static previews / tooling — live runs use `randomWorldSeed()`. */
 export const WORLD_SEED = 20261020;
 export const WORLD_MARGIN = 100;
+
+/** Fresh procedural map seed for each run. */
+export function randomWorldSeed() {
+  return (Math.random() * 0x7fffffff) | 0;
+}
 export const DAY_LENGTH = 160;
 export const PHASE_DUSK = 0.6;
 export const PHASE_NIGHT = 0.68;

@@ -31,7 +31,14 @@ export class MenuScene extends Phaser.Scene {
       ui.hideMainMenu();
       ui.hideMeta();
       ui.hideGameOver();
-      this.scene.start('RunScene');
+      this.scene.start('RunScene', { continue: false });
+    };
+    ui.onMenuContinue = () => {
+      Audio.unlock();
+      ui.hideMainMenu();
+      ui.hideMeta();
+      ui.hideGameOver();
+      this.scene.start('RunScene', { continue: true });
     };
     ui.onMenuMeta = () => {
       ui.showMetaMenu(meta);

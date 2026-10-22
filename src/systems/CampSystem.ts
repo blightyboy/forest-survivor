@@ -119,13 +119,25 @@ export class CampSystem {
   campAlertCd = 0;
   /** Throttle red screen flash while structures take continuous DPS. */
   structureHitFlashCd = 0;
+  /** Mutator: thinner smith stock (Scarcity). */
+  shopStockMult = 1;
+  /** Win-goal night count — when assaultNight matches, run final gauntlet. */
+  winGoalNights = 0;
+  /** Fired when a true boss spawns (move telegraph — ability ids). */
+  onTrueBossSpawn?: (name: string, moves: string[]) => void;
   healFx = 0;
   onCampAttack?: () => void;
   /** Fired (throttled) whenever the cabin or a palisade takes damage. */
   onStructureHit?: () => void;
   onNightBoss?: (kind: 'mini' | 'true', day: number) => void;
   /** Fired when the night raid banner should show (count + directions). */
-  onRaidStart?: (day: number, count: number, directions: string) => void;
+  onRaidStart?: (
+    day: number,
+    count: number,
+    directions: string,
+    speciesHint?: string,
+    topSpecies?: string[],
+  ) => void;
   onPay?: (x: number, y: number, wood: number, meat: number, gold: number) => void;
   /** Legacy addShake — wired from RunScene (respects Options shakeScale). */
   onShake?: (intensity: number) => void;
@@ -577,7 +589,7 @@ export class CampSystem {
       this.shopVersion++;
       return;
     }
-    this.shopStock = refreshShopStock(forge, this.meta.smithLuck || 0);
+    this.shopStock = refreshShopStock(forge, this.meta.smithLuck || 0, this.shopStockMult);
     if (resetTimer) {
       this.shopRefreshIn = 300;
       this.smithRerolls = 0;
@@ -668,7 +680,9 @@ export class CampSystem {
     this.raidSpawnT = 0;
 
     const n = dayNumber;
-    const count = Math.min(52, 3 + 3 * n + Math.floor((n * n) / 3));
+    const gauntlet = this.winGoalNights > 0 && dayNumber === this.winGoalNights;
+    let count = Math.min(52, 3 + 3 * n + Math.floor((n * n) / 3));
+    if (gauntlet) count = Math.min(64, Math.round(count * 1.45) + 8);
     const queue: RaidQueueSpec[] = [];
     for (let i = 0; i < count; i++) {
       const wBoar = 1;
@@ -691,8 +705,14 @@ export class CampSystem {
     this.raidQueue = queue;
 
     const dirs = this.raidDirections();
-    this.onRaidStart?.(dayNumber, count, dirs);
-    this.onNightBoss?.(isBossNight(dayNumber) ? 'true' : 'mini', dayNumber);
+    const { hint: speciesHint, top: topSpecies } = summarizeRaidQueue(queue);
+    this.onRaidStart?.(dayNumber, count, dirs, speciesHint, topSpecies);
+    const gauntletNight = this.winGoalNights > 0 && dayNumber === this.winGoalNights;
+    if (gauntletNight) {
+      this.onNightBoss?.('true', dayNumber);
+    } else {
+      this.onNightBoss?.(isBossNight(dayNumber) ? 'true' : 'mini', dayNumber);
+    }
 
     // Boss leads the night once start-of-run grace ends (retry in update).
     this.trySpawnNightBoss(animals, threatM, graceLeft);
@@ -705,10 +725,20 @@ export class CampSystem {
     const dayNumber = this.assaultNight || 1;
     const ww = animals.worldSize.w;
     const wh = animals.worldSize.h;
-    if (isBossNight(dayNumber)) {
+    const gauntlet = this.winGoalNights > 0 && dayNumber === this.winGoalNights;
+    if (gauntlet || isBossNight(dayNumber)) {
       const boss = animals.spawnTrueBoss(dayNumber, threatM, this.x, this.y, ww, wh, this.raidAngles[0]);
       if (!boss) return;
       this.nightBossSpawned = true;
+      const moves = [...(boss.bossMoves || [])];
+      this.onTrueBossSpawn?.(boss.displayName || boss.species, moves);
+      if (gauntlet) {
+        // Extra miniboss escorts for the finish-line night.
+        animals.spawnMiniboss(dayNumber, threatM * 1.1, this.x, this.y, ww, wh, this.raidAngles);
+        if (dayNumber >= 12) {
+          animals.spawnMiniboss(dayNumber, threatM * 1.15, this.x, this.y, ww, wh, this.raidAngles);
+        }
+      }
     } else {
       const n = animals.spawnMiniboss(dayNumber, threatM, this.x, this.y, ww, wh, this.raidAngles);
       if (!n) return;
@@ -1005,4 +1035,19 @@ export class CampSystem {
     for (const ar of this.arrows) ar.canvas.destroy();
     this.arrows.length = 0;
   }
+}
+
+function summarizeRaidQueue(queue: RaidQueueSpec[]): { hint: string; top: string[] } {
+  const counts = new Map<string, number>();
+  for (const q of queue) counts.set(q.species, (counts.get(q.species) || 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  if (!ranked.length) return { hint: '', top: [] };
+  const top = ranked.map(([sp]) => sp);
+  const hint = ranked
+    .map(([sp, n]) => {
+      const label = SPECIES[sp]?.name || sp;
+      return n > 1 ? `${n}× ${label}` : label;
+    })
+    .join(', ');
+  return { hint, top };
 }

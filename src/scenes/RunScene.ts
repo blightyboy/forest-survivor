@@ -16,18 +16,47 @@ import { DomUI } from '../ui/DomUI';
 import { Audio } from '../audio/Audio';
 import type { RunPlayer } from '../run/RunTypes';
 import type { LevelUpCard } from '../data/passives';
-import { clamp, damp, formatNum } from '../core/math';
+import { clamp, damp, formatNum, rand } from '../core/math';
 import { cameraZoom, cameraWorldBounds } from '../core/renderScale';
-import { threatAt, UPGRADES, isBossNight, ELEMENTS, upgradeCost, START_GRACE } from '../data/constants';
+import {
+  threatAt,
+  UPGRADES,
+  isBossNight,
+  ELEMENTS,
+  upgradeCost,
+  START_GRACE,
+  MAX_WEAPONS,
+  type ElementId,
+} from '../data/constants';
 import { COACH_STEPS } from '../data/tutorials';
 import { Music } from '../audio/Music';
 import { settings } from '../meta/Settings';
 import { equipItem, recomputePlayerStats } from '../systems/PlayerStats';
-import { BOSS_NAMES } from '../data/animals';
+import { BOSS_NAMES, SPECIES } from '../data/animals';
 import type { BossAbilityId } from '../systems/EnemyAbilities';
 import { CanvasSprite } from '../art/draw/CanvasSprite';
 import { drawPlayer } from '../art/draw/playerDraw';
 import { GroundLayer } from '../art/ground';
+import {
+  computeMutatorEffects,
+  normalizeMutatorIds,
+  type MutatorEffects,
+  type MutatorId,
+} from '../data/mutators';
+import { POI_DEFS, POI_INTERACT_R, POI_PROMPT_R, type WorldPoi } from '../data/pois';
+import {
+  WIN_GOAL_BY_ID,
+  normalizeWinGoal,
+  winGoalNights,
+  type WinGoalId,
+} from '../data/winGoals';
+import type { AchievementId } from '../data/achievements';
+import {
+  clearRunSnapshot,
+  loadRunSnapshot,
+  saveRunSnapshot,
+  type RunSnapshot,
+} from '../meta/RunSave';
 
 export class RunScene extends Phaser.Scene {
   world!: World;
@@ -67,8 +96,18 @@ export class RunScene extends Phaser.Scene {
     { img: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Graphics }
   >();
   bushSprites = new Map<string, Phaser.GameObjects.Image>();
+  poiSprites = new Map<number, Phaser.GameObjects.Image>();
+  /** Floating [E] prompt above the nearest landmark. */
+  poiPrompt: Phaser.GameObjects.Container | null = null;
   pickupGfx: { img: Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }[] = [];
   metaBonuses = meta.bonuses();
+  mutators: MutatorId[] = [];
+  mutatorFx: MutatorEffects = computeMutatorEffects([], START_GRACE);
+  winGoal: WinGoalId = 'none';
+  /** Load mid-run checkpoint instead of a fresh world. */
+  private resumeFromSave = false;
+  private saveAcc = 0;
+  private won = false;
   paused = false;
   levelUpOpen = false;
   faceNearest = true;
@@ -103,6 +142,7 @@ export class RunScene extends Phaser.Scene {
     M: Phaser.Input.Keyboard.Key;
     F: Phaser.Input.Keyboard.Key;
     R: Phaser.Input.Keyboard.Key;
+    E: Phaser.Input.Keyboard.Key;
     ONE: Phaser.Input.Keyboard.Key;
     TWO: Phaser.Input.Keyboard.Key;
     THREE: Phaser.Input.Keyboard.Key;
@@ -124,11 +164,17 @@ export class RunScene extends Phaser.Scene {
     super({ key: 'RunScene' });
   }
 
+  init(data?: { continue?: boolean }) {
+    this.resumeFromSave = !!data?.continue;
+  }
+
   create() {
     Audio.unlock();
     Music.setVolume(settings.musicVolume);
     // Phaser reuses the scene instance — reset per-run state (field inits only run once).
     this.paused = false;
+    this.won = false;
+    this.saveAcc = 0;
     this.levelUpOpen = false;
     this.faceNearest = true;
     this.day1BannerShown = false;
@@ -149,13 +195,29 @@ export class RunScene extends Phaser.Scene {
     this.treeSprites.clear();
     this.rockSprites.clear();
     this.bushSprites.clear();
+    this.poiSprites.forEach((s) => s.destroy());
+    this.poiSprites.clear();
+    this.poiPrompt?.destroy();
+    this.poiPrompt = null;
     this.pickupGfx.length = 0;
     this.arsenal = new ArsenalSystem();
     this.assault = new AssaultSystem();
     this.dayNight = new DayNightSystem();
     this.runStart = this.time.now;
-    this.graceLeft = START_GRACE;
-    this.world = new World();
+    const snap = this.resumeFromSave ? loadRunSnapshot() : null;
+    if (!snap) this.resumeFromSave = false;
+    this.mutators = normalizeMutatorIds(snap?.mutators ?? settings.mutators);
+    this.winGoal = normalizeWinGoal(snap?.winGoal ?? settings.winGoal);
+    this.mutatorFx = computeMutatorEffects(this.mutators, START_GRACE);
+    this.graceLeft = snap ? snap.graceLeft : this.mutatorFx.graceSec;
+    this.assault.waveMult = this.mutatorFx.siegeWaveMult;
+    this.assault.timerMult = this.mutatorFx.siegeTimerMult;
+    if (snap) {
+      this.assault.index = snap.assaultIndex || 0;
+      this.assault.timer = snap.assaultTimer ?? 18;
+    }
+    // New procedural layout every run (ground layer follows world.seed).
+    this.world = new World(snap?.worldSeed);
     // World entities Y-sort via child depth; FX (projectiles, float text) stay above.
     this.worldLayer = this.add.container(0, 0).setDepth(0);
     this.fxLayer = this.add.container(0, 0).setDepth(10);
@@ -172,6 +234,7 @@ export class RunScene extends Phaser.Scene {
 
     this.metaBonuses = meta.bonuses();
     const bonuses = this.metaBonuses;
+    // Snap may move the player after systems boot; start at spawn for a fresh run.
     this.player = {
       x: this.world.spawnX,
       y: this.world.spawnY,
@@ -234,6 +297,7 @@ export class RunScene extends Phaser.Scene {
     this.arsenal.addWeapon('axe', 1);
     this.arsenal.applyMetaRunStart(this.player, bonuses);
     recomputePlayerStats(this.player, this.arsenal, bonuses);
+    this.applyMutatorPlayerMods(true);
 
     // Origin on feet (not canvas bottom) so HP/dash bars can sit below without floating the sprite.
     this.playerCanvas = new CanvasSprite(this, this.worldLayer, 72, 96, 'rt_player', 0.5, (96 - 18) / 96);
@@ -243,6 +307,7 @@ export class RunScene extends Phaser.Scene {
     this.animals = new AnimalSystem(this, this.worldLayer);
     this.animals.worldCenter = { x: this.world.spawnX, y: this.world.spawnY };
     this.animals.worldSize = { w: this.world.w, h: this.world.h };
+    this.animals.biomeAt = (x, y) => this.world.biomeAt(x, y);
     this.animals.onPlayerHurt = () => {
       this.playerFlash = 0.15;
       this.shake(0.45);
@@ -262,6 +327,7 @@ export class RunScene extends Phaser.Scene {
       () => this.onPlayerLevelUp(),
       bonuses,
     );
+    this.combat.lootMult = this.mutatorFx.lootMult;
     this.combat.onStaticKilled = (s) => {
       // Trees keep a stump and regrow — don't destroy the sprite entry.
       if (s.type === 'tree') return;
@@ -277,6 +343,9 @@ export class RunScene extends Phaser.Scene {
     this.animals.setFxLayer(this.fxLayer);
 
     this.camp = new CampSystem(this, this.worldLayer, this.world.spawnX, this.world.spawnY, bonuses);
+    this.camp.shopStockMult = this.mutatorFx.shopCountMult;
+    this.camp.winGoalNights = winGoalNights(this.winGoal);
+    if (this.mutatorFx.shopCountMult !== 1) this.camp.restockShop(true);
     this.animals.setCamp(this.camp);
     this.animals.spawnBlocked = (x, y) => this.camp.spawnInBase(x, y, 48);
 
@@ -320,37 +389,81 @@ export class RunScene extends Phaser.Scene {
     this.camp.onCampAttack = () =>
       this.ui.banner('The camp is under attack!', 'Defend the cabin or the run is over.', '#ff6b6b');
     this.camp.onStructureHit = () => this.ui.flashCampHurt();
-    this.camp.onRaidStart = (day, count, directions) => {
+    this.camp.onRaidStart = (day, count, directions, speciesHint, topSpecies) => {
+      const goalN = winGoalNights(this.winGoal);
+      const gauntlet = goalN > 0 && day === goalN;
+      const species = speciesHint ? ` · ${speciesHint}` : '';
+      const pills = this.ui.speciesPillsHtml(topSpecies || []);
       this.ui.banner(
-        `Night ${day}: RAID!`,
-        `${count} beasts attack from the ${directions}!`,
-        '#ff6b6b',
+        gauntlet ? `Night ${day}: FINAL GAUNTLET!` : `Night ${day}: RAID!`,
+        `${count} beasts from the ${directions}${species}`,
+        gauntlet ? '#ffe08a' : '#ff6b6b',
+        {
+          subHtml: `${count} beasts from the ${directions}${species}${pills ? ` ${pills}` : ''}`,
+        },
       );
-      this.ui.setTip('Night raid — defend the camp!');
+      this.ui.setTip(gauntlet ? 'Final gauntlet — survive to win!' : 'Night raid — defend the camp!');
+    };
+    this.camp.onTrueBossSpawn = (name, moves) => {
+      const ids = moves.filter((id): id is BossAbilityId => !!id) as BossAbilityId[];
+      for (const id of ids) this.noteBossMoveDiscover(id);
+      const chips = ids.map((id) => this.ui.bossMoveChipHtml(id)).filter(Boolean);
+      this.ui.banner(
+        `${name}`,
+        chips.length ? '' : 'Signature moves incoming',
+        '#ff4d6d',
+        chips.length
+          ? {
+              subHtml: `Signature moves<div class="fs-boss-moves" style="justify-content:center;margin-top:6px">${chips.join('')}</div>`,
+            }
+          : undefined,
+      );
     };
     this.camp.onNightBoss = (kind, day) => {
-      if (kind === 'true') {
-        this.ui.banner('BOSS NIGHT', `Night ${day} — a true boss leads the raid!`, '#ff4d6d');
+      const goalN = winGoalNights(this.winGoal);
+      if (goalN > 0 && day === goalN) {
+        this.ui.banner('GAUNTLET BOSS', `Night ${day} — true boss + elite guards!`, '#ffe08a');
+      } else if (kind === 'true') {
+        this.ui.banner('BOSS NIGHT', `Night ${day} — true boss and elite guards!`, '#ff4d6d');
       } else {
         this.ui.banner(
           day >= 7 ? 'Twin minibosses!' : 'Miniboss incoming!',
-          'A huge beast leads tonight\'s raid.',
+          'Elite guards hunt you and the camp.',
           '#c46bff',
         );
       }
     };
     this.animals.onDayBoss = (name) => {
-      this.ui.banner(`${name}!`, 'Hunts you and your camp.', '#c46bff');
-      this.ui.setTip(`${name} hunts the camp!`);
+      this.ui.banner(`${name}!`, 'Elite guards hunt you and your camp.', '#c46bff');
+      this.ui.setTip(`${name} and guards hunt the camp!`);
     };
     this.wireUi();
+    this.ui.threatHudMult = this.mutatorFx.threatMult;
+    this.ui.setActiveMutators(this.mutators);
     this.ui.refreshCampPanel(this.camp, this.player, this.camp.contains(this.player.x, this.player.y, 30));
-    this.ui.banner(
-      'Day 1',
-      `Chop, hunt, fortify. Wildlife ignores you and the camp for ${START_GRACE}s — strike first and they fight back.`,
-      '#ffe08a',
-    );
-    this.day1BannerShown = true;
+
+    if (snap) {
+      this.applyRunSnapshot(snap);
+      this.ui.banner(
+        `Day ${this.dayNight.dayNumber}`,
+        'Checkpoint restored — keep the camp standing.',
+        '#7fd3ff',
+      );
+      this.day1BannerShown = true;
+    } else {
+      clearRunSnapshot();
+      const goal = WIN_GOAL_BY_ID[this.winGoal];
+      const graceNote =
+        this.graceLeft > 0
+          ? `Wildlife ignores you for ${Math.round(this.graceLeft)}s.`
+          : 'No opening grace.';
+      const goalNote =
+        goal.nights > 0
+          ? ` Win goal: ${goal.name} (${goal.nights} nights).`
+          : '';
+      this.ui.banner('Day 1', `Chop, hunt, fortify. ${graceNote}${goalNote}`, '#ffe08a');
+      this.day1BannerShown = true;
+    }
 
     this.cameras.main.setBounds(0, 0, this.world.w, this.world.h);
     this.cameras.main.startFollow(this.playerSprite, true, 0.12, 0.12);
@@ -374,6 +487,7 @@ export class RunScene extends Phaser.Scene {
       M: Phaser.Input.Keyboard.KeyCodes.M,
       F: Phaser.Input.Keyboard.KeyCodes.F,
       R: Phaser.Input.Keyboard.KeyCodes.R,
+      E: Phaser.Input.Keyboard.KeyCodes.E,
       ONE: Phaser.Input.Keyboard.KeyCodes.ONE,
       TWO: Phaser.Input.Keyboard.KeyCodes.TWO,
       THREE: Phaser.Input.Keyboard.KeyCodes.THREE,
@@ -445,7 +559,11 @@ export class RunScene extends Phaser.Scene {
       } else {
         Audio.playSfx('upgrade');
       }
+      if (this.arsenal.weaponOrder.length >= MAX_WEAPONS) {
+        this.tryUnlockAchievement('full_kit');
+      }
       recomputePlayerStats(this.player, this.arsenal, this.metaBonuses);
+      this.applyMutatorPlayerMods();
       this.closeLevelUp();
     };
     ui.onCardBanish = (card) => {
@@ -474,6 +592,8 @@ export class RunScene extends Phaser.Scene {
       );
     };
     ui.onQuitRun = () => this.endRun(false);
+    ui.onSaveQuit = () => this.saveAndQuitToMenu();
+    this.animals.onBeastKilled = (a) => this.onBeastKilledMeta(a);
     ui.onUpgradeCamp = (id) => this.tryCampUpgrade(id);
     ui.onBuyShop = (i) => this.tryBuyShop(i);
     ui.onSmithReroll = () => {
@@ -506,8 +626,55 @@ export class RunScene extends Phaser.Scene {
       this.scene.restart();
     };
     ui.onQuitRun = () => this.endRun(false);
+    ui.onSaveQuit = () => this.saveAndQuitToMenu();
     ui.onTutorialDismiss = () => this.dismissTutorial();
     ui.onCoachWorldRect = (key) => this.coachWorldRect(key);
+  }
+
+  /** Pause → Save & Quit: keep continue checkpoint and return to the main menu. */
+  private saveAndQuitToMenu() {
+    this.checkpointSave();
+    this.paused = true;
+    this.ui.hidePause();
+    this.ui.hideLevelUp();
+    this.ui.hideCampShop();
+    this.ui.cancelConfirm();
+    this.ui.banner('Run saved', 'Continue from the main menu anytime.', '#7fd3ff');
+    this.scene.start('MenuScene');
+  }
+
+  /** Codex + achievements from beast kills. */
+  private onBeastKilledMeta(a: { species: string; trueBoss?: boolean; bossMoves?: BossAbilityId[] }) {
+    const discovered = meta.discoverSpecies(a.species);
+    if (discovered) {
+      const name = SPECIES[a.species]?.name || a.species;
+      this.ui.setTip(`Codex: ${name} discovered (+${discovered.credits})`);
+      const n = meta.discoveredSpecies.length;
+      if (n >= 5) this.tryUnlockAchievement('bestiary_5');
+      if (n >= 12) this.tryUnlockAchievement('bestiary_12');
+    }
+    this.tryUnlockAchievement('first_blood');
+    if (a.trueBoss) {
+      this.tryUnlockAchievement('true_boss');
+      for (const id of a.bossMoves || []) this.noteBossMoveDiscover(id);
+    }
+  }
+
+  private noteBossMoveDiscover(id: BossAbilityId) {
+    const got = meta.discoverBossMove(id);
+    if (got) this.ui.setTip(`Codex: boss move logged (+${got.credits})`);
+  }
+
+  private tryUnlockAchievement(id: AchievementId) {
+    const got = meta.unlockAchievement(id);
+    if (!got) return;
+    this.ui.banner(`Achievement: ${got.name}`, `+${got.credits} credits`, '#ffe08a');
+  }
+
+  private checkRaidAchievements() {
+    const n = this.player.raidsSurvived;
+    if (n >= 3) this.tryUnlockAchievement('raid_3');
+    if (n >= 6) this.tryUnlockAchievement('raid_6');
   }
 
   /** Screen-space rect for world coach targets (dash bar / first-hit beast). */
@@ -598,6 +765,7 @@ export class RunScene extends Phaser.Scene {
     const item = this.camp.buyShop(i, this.player);
     if (item) {
       equipItem(this.player, item, this.arsenal, this.metaBonuses);
+      this.applyMutatorPlayerMods();
       this.floatText.spawn(this.player.x, this.player.y - 60, item.name, item.color, 16, { life: 1.2 });
       this.ui.invalidateCampPanel();
       this.ui.refreshCampPanel(this.camp, this.player, true);
@@ -607,6 +775,7 @@ export class RunScene extends Phaser.Scene {
   }
 
   togglePause() {
+    if (this.won) return;
     if (this.levelUpOpen) return;
     if (this.ui.isTutorialOpen()) {
       this.dismissTutorial();
@@ -625,6 +794,7 @@ export class RunScene extends Phaser.Scene {
       this.ui.hidePause();
     } else if (this.player.alive) {
       this.paused = true;
+      this.checkpointSave();
       this.ui.showPause(
         this.player,
         this.arsenal,
@@ -791,17 +961,42 @@ export class RunScene extends Phaser.Scene {
 
     // 8) Threat climbing — after the first night or when threat ramps.
     if (this.canOfferTutorial('threat')) {
-      const threat = threatAt(this.dayNight.runTime);
+      const threat = this.runThreat();
       if (this.dayNight.dayNumber >= 2 || threat.hp >= 1.25) {
         this.offerTutorial('threat');
       }
     }
   }
 
+  /** Threat scaled by active mutators (Savage). */
+  private runThreat() {
+    const base = threatAt(this.dayNight.runTime);
+    const mul = this.mutatorFx.threatMult;
+    if (mul === 1) return base;
+    return {
+      m: base.m * mul,
+      hp: base.hp * mul,
+      dmg: base.dmg * mul,
+      speed: Math.min(1.5, base.speed * (1 + (mul - 1) * 0.35)),
+    };
+  }
+
+  /** Re-apply Glass (etc.) after `recomputePlayerStats` rebuilds base numbers. */
+  private applyMutatorPlayerMods(fillHp = false) {
+    const fx = this.mutatorFx;
+    if (fx.playerHpMult !== 1) {
+      this.player.maxHp = Math.max(20, Math.round(this.player.maxHp * fx.playerHpMult));
+      if (fillHp) this.player.hp = this.player.maxHp;
+      else this.player.hp = Math.min(this.player.hp, this.player.maxHp);
+    }
+    if (fx.playerDmgMult !== 1) this.player.damageMult *= fx.playerDmgMult;
+  }
+
   /** Legacy Game.onLevelUp — apply +10 max HP / level, FX, then offer cards. */
   onPlayerLevelUp() {
     const p = this.player;
     recomputePlayerStats(p, this.arsenal, this.metaBonuses);
+    this.applyMutatorPlayerMods();
     this.floatText.spawn(p.x, p.y - 90, `LEVEL ${p.level}!`, '#ffd23f', 26, { life: 1.6, vy: -30 });
     this.floatText.spawn(p.x, p.y - 112, '+10 Max HP', '#9ef08a', 14, { life: 1.2, vy: -24 });
     this.vfx?.ring(p.x, p.y, 'rgba(255,210,63,0.95)', 10, 260, 0.6);
@@ -855,9 +1050,15 @@ export class RunScene extends Phaser.Scene {
     this.updateTutorials();
     if (this.graceLeft > 0) this.graceLeft = Math.max(0, this.graceLeft - dt);
     this.tutRunAge += dt;
-    const threat = threatAt(this.dayNight.runTime);
+    this.saveAcc += dt;
+    if (this.saveAcc >= 90) {
+      this.saveAcc = 0;
+      this.checkpointSave();
+    }
+    const threat = this.runThreat();
     const dayEvt = this.dayNight.update(dt);
     this.handleDayEvents(dayEvt, threat);
+    if (this.won) return;
 
     this.combat.setKillContext({
       isNight: this.dayNight.isNight,
@@ -890,7 +1091,10 @@ export class RunScene extends Phaser.Scene {
       this.camp.raidActive,
       // Hold assaults during start-of-run grace.
       this.graceLeft,
-      (title, sub, color) => this.ui.banner(title, sub, color),
+      (title, sub, color, topSpecies) => {
+        const pills = this.ui.speciesPillsHtml(topSpecies || []);
+        this.ui.banner(title, sub, color, pills ? { subHtml: `${sub} ${pills}` } : undefined);
+      },
     );
     this.animals.update(
       dt,
@@ -1033,6 +1237,14 @@ export class RunScene extends Phaser.Scene {
       this.ui.onCardReroll?.();
     }
     if (
+      this.player.alive &&
+      !this.levelUpOpen &&
+      !this.paused &&
+      Phaser.Input.Keyboard.JustDown(this.keys.E)
+    ) {
+      this.tryInteractPoi();
+    }
+    if (
       (Phaser.Input.Keyboard.JustDown(this.keys.B) || Phaser.Input.Keyboard.JustDown(this.keys.U)) &&
       this.player.alive &&
       !this.levelUpOpen &&
@@ -1080,23 +1292,33 @@ export class RunScene extends Phaser.Scene {
   ) {
     if (dayEvt.leftNight || dayEvt.newDay) {
       const survived = this.camp.hp > 0 && this.camp.pendingRaidCredit;
+      const nightJustCleared = this.camp.assaultNight;
       const reward = this.camp.resolveDawnSurvival(this.player);
       // Legacy Base.onDawn — full cabin + palisade repair whenever night ends.
       this.camp.onDawn();
       if (survived) this.animals.retreatRaiders();
       if (reward) {
         this.ui.banner('Raid repelled!', `Reward: +${reward.wood} wood, +${reward.gold} gold`, '#9ef08a');
+        this.checkRaidAchievements();
       }
-      if (dayEvt.newDay && this.dayNight.dayNumber > 1) {
+      const goalN = winGoalNights(this.winGoal);
+      if (survived && goalN > 0 && nightJustCleared === goalN && !this.won) {
+        this.won = true;
+        this.endRunVictory();
+        return;
+      }
+      if (dayEvt.newDay && this.dayNight.dayNumber > 1 && !this.won) {
+        this.reshuffleForestLandmarks();
         const intro = survived
-          ? 'The raiders retreat at sunrise. '
-          : 'The camp has been repaired. ';
+          ? 'Raiders retreat. '
+          : 'Camp repaired. ';
         this.ui.banner(
-          `Day ${this.dayNight.dayNumber}`,
-          `${intro}Threat grows: x${threat.hp.toFixed(1)}.`,
-          '#ffe08a',
+          'The forest has shifted',
+          `Day ${this.dayNight.dayNumber} — dens, wagons, shrines & veins move. ${intro}Threat x${threat.hp.toFixed(1)}.`,
+          '#a8e6ff',
         );
       }
+      this.checkpointSave();
     }
     if (dayEvt.enteredDusk) {
       const day = this.dayNight.dayNumber;
@@ -1117,10 +1339,12 @@ export class RunScene extends Phaser.Scene {
         );
       }
       if (day === 1) this.offerTutorial('firstNight');
+      this.checkpointSave();
     }
     if (dayEvt.enteredNight) {
       Audio.playSfx('howl');
       this.camp.startNightRaid(this.dayNight.dayNumber, this.animals, threat.m, this.graceLeft);
+      this.checkpointSave();
     }
   }
 
@@ -1132,6 +1356,7 @@ export class RunScene extends Phaser.Scene {
       trueBoss?: boolean;
       element?: string | null;
       bossMoves?: BossAbilityId[];
+      elemMoves?: string[];
     } | null = null;
     for (const a of this.animals.animals) {
       if (a.dead || !a.boss) continue;
@@ -1141,7 +1366,8 @@ export class RunScene extends Phaser.Scene {
         maxHp: a.maxHp,
         trueBoss: a.trueBoss,
         element: a.element,
-        bossMoves: a.trueBoss ? a.bossMoves : undefined,
+        bossMoves: a.trueBoss && a.bossMoves?.length ? a.bossMoves : undefined,
+        elemMoves: a.elemMoves?.length ? a.elemMoves : undefined,
       };
       if (!boss || (a.trueBoss && !boss.trueBoss) || a.hp > boss.hp) boss = candidate;
     }
@@ -1556,6 +1782,189 @@ export class RunScene extends Phaser.Scene {
         .setRotation(wob)
         .setDepth(bush.y - 1);
     }
+
+    for (const poi of this.world.pois) {
+      let spr = this.poiSprites.get(poi.id);
+      if (poi.used) {
+        if (spr) {
+          spr.destroy();
+          this.poiSprites.delete(poi.id);
+        }
+        continue;
+      }
+      const onScreen = poi.x >= vx0 && poi.x <= vx1 && poi.y >= vy0 && poi.y <= vy1;
+      if (!onScreen) {
+        if (spr) {
+          spr.destroy();
+          this.poiSprites.delete(poi.id);
+        }
+        continue;
+      }
+      if (!spr) {
+        const def = POI_DEFS[poi.kind];
+        const tex = this.textures.exists(def.tex) ? def.tex : 'rock';
+        // Camp-scale bake (~cabin width); slight boost for presence.
+        spr = this.add.image(poi.x, poi.y, tex).setOrigin(0.5, 1).setScale(1.05).setDepth(poi.y);
+        this.worldLayer.add(spr);
+        this.poiSprites.set(poi.id, spr);
+      }
+      spr.setVisible(true).setPosition(poi.x, poi.y).setDepth(poi.y).setAlpha(1);
+    }
+
+    this.syncPoiPrompt();
+  }
+
+  /** World-space [E] prompt when standing near a landmark. */
+  private syncPoiPrompt() {
+    if (!this.player?.alive || this.paused || this.levelUpOpen) {
+      this.poiPrompt?.setVisible(false);
+      return;
+    }
+    const poi = this.world.nearestPoi(this.player.x, this.player.y, POI_PROMPT_R);
+    if (!poi) {
+      this.poiPrompt?.setVisible(false);
+      return;
+    }
+    const def = POI_DEFS[poi.kind];
+    const inRange = Math.hypot(this.player.x - poi.x, this.player.y - poi.y) <= POI_INTERACT_R;
+    if (!this.poiPrompt) {
+      const keyBg = this.add
+        .rectangle(0, 0, 168, 38, 0x1a140c, 0.9)
+        .setStrokeStyle(2, 0xffe08a, 0.9);
+      const keyLabel = this.add
+        .text(-58, 0, 'E', {
+          fontFamily: 'Trebuchet MS, Segoe UI, system-ui, sans-serif',
+          fontSize: '18px',
+          fontStyle: 'bold',
+          color: '#1a140c',
+          backgroundColor: '#ffe08a',
+          padding: { x: 9, y: 3 },
+        })
+        .setOrigin(0.5);
+      const nameLabel = this.add
+        .text(-28, 0, '', {
+          fontFamily: 'Trebuchet MS, Segoe UI, system-ui, sans-serif',
+          fontSize: '13px',
+          fontStyle: 'bold',
+          color: '#f2e6d4',
+        })
+        .setOrigin(0, 0.5);
+      this.poiPrompt = this.add.container(0, 0, [keyBg, keyLabel, nameLabel]);
+      this.worldLayer.add(this.poiPrompt);
+    }
+    const nameLabel = this.poiPrompt.list[2] as Phaser.GameObjects.Text;
+    nameLabel.setText(def.name);
+    const bob = Math.sin(this.dayNight.runTime * 5) * 3;
+    this.poiPrompt
+      .setVisible(true)
+      .setPosition(poi.x, poi.y - 128 + bob)
+      .setDepth(poi.y + 40)
+      .setAlpha(inRange ? 1 : 0.72);
+  }
+
+  /** E — activate nearest unused POI. */
+  private tryInteractPoi() {
+    const poi = this.world.nearestPoi(this.player.x, this.player.y, POI_INTERACT_R);
+    if (!poi) {
+      // Quiet deny when far — prompt only shows when close.
+      return;
+    }
+    this.activatePoi(poi);
+  }
+
+  private activatePoi(poi: WorldPoi) {
+    if (poi.used) return;
+    poi.used = true;
+    const def = POI_DEFS[poi.kind];
+    const threat = this.runThreat();
+    const p = this.player;
+
+    if (poi.kind === 'den') {
+      const pack = 3 + Math.floor(Math.random() * 2);
+      const kinds = ['wolf', 'dire_wolf', 'boar', 'dire_boar'] as const;
+      let n = 0;
+      for (let i = 0; i < pack; i++) {
+        const sp = kinds[Math.floor(Math.random() * kinds.length)];
+        const ang = (i / pack) * Math.PI * 2 + rand(-0.2, 0.2);
+        const d = rand(40, 90);
+        const x = poi.x + Math.cos(ang) * d;
+        const y = poi.y + Math.sin(ang) * d;
+        const child = this.animals.spawn(sp, x, y, {
+          threatM: threat.m,
+          stars: 2 + Math.floor(Math.random() * 3),
+          variant: sp.startsWith('dire_') ? 'dire' : Math.random() < 0.35 ? 'dire' : undefined,
+        });
+        if (child) n++;
+      }
+      this.ui.banner(def.name, `${n} elites pour out!`, def.color);
+      Audio.playSfx('howl');
+      this.vfx.sparks(poi.x, poi.y, 16, def.color);
+    } else if (poi.kind === 'wagon') {
+      this.combat.spawnPickup('wood', poi.x, poi.y, 18 + Math.floor(p.level * 1.5));
+      this.combat.spawnPickup('meat', poi.x + 10, poi.y, 10 + Math.floor(p.level));
+      this.combat.spawnPickup('gold', poi.x - 10, poi.y, 8 + Math.floor(p.level * 0.8));
+      if (Math.random() < 0.45) {
+        this.combat.spawnPickup('powerup', poi.x, poi.y + 8, 1, 'haste');
+      }
+      this.ui.banner(def.name, 'Supplies scattered!', def.color);
+      Audio.playSfx('gold');
+      this.vfx.sparkle(poi.x, poi.y, def.color);
+    } else if (poi.kind === 'shrine') {
+      const roll = Math.random();
+      if (roll < 0.34) {
+        p.hp = p.maxHp;
+        this.ui.banner(def.name, 'Full heal!', def.color);
+        Audio.playSfx('eat');
+      } else if (roll < 0.67) {
+        const order = this.arsenal.weaponOrder;
+        if (order.length) {
+          const id = order[Math.floor(Math.random() * order.length)];
+          this.arsenal.upgradeWeapon(id);
+          this.ui.banner(def.name, `${id} +1 level`, def.color);
+        } else {
+          p.buffFury = Math.max(p.buffFury, 12);
+          this.ui.banner(def.name, 'Fury blessing!', def.color);
+        }
+        Audio.playSfx('upgrade');
+      } else {
+        p.buffFury = Math.max(p.buffFury, 14);
+        this.ui.banner(def.name, 'Fury blessing!', def.color);
+        Audio.playSfx('horn');
+      }
+      this.vfx.ring(poi.x, poi.y, def.color, 20, 110, 0.55);
+      recomputePlayerStats(p, this.arsenal, this.metaBonuses);
+      this.applyMutatorPlayerMods();
+    } else if (poi.kind === 'vein') {
+      // Scatter gold chunks around the vein (no rock→ore conversion).
+      const chunks = 5 + Math.floor(Math.random() * 3) + Math.floor(p.level / 4);
+      let total = 0;
+      for (let i = 0; i < chunks; i++) {
+        const ang = (i / chunks) * Math.PI * 2 + rand(-0.35, 0.35);
+        const d = rand(28, 95);
+        const amount = 3 + Math.floor(Math.random() * 4) + Math.floor(p.level * 0.25);
+        total += amount;
+        this.combat.spawnPickup(
+          'gold',
+          poi.x + Math.cos(ang) * d,
+          poi.y + Math.sin(ang) * d * 0.85,
+          amount,
+        );
+      }
+      // Central rich pile.
+      const core = 10 + Math.floor(p.level * 0.9);
+      total += core;
+      this.combat.spawnPickup('gold', poi.x, poi.y - 8, core);
+      this.ui.banner(def.name, `${chunks + 1} gold chunks · +${total}g`, def.color);
+      Audio.playSfx('gold');
+      this.vfx.rockChips(poi.x, poi.y, 14);
+      this.vfx.sparkle(poi.x, poi.y, def.color);
+    }
+
+    const spr = this.poiSprites.get(poi.id);
+    if (spr) {
+      spr.destroy();
+      this.poiSprites.delete(poi.id);
+    }
   }
 
   syncPickups() {
@@ -1687,10 +2096,221 @@ export class RunScene extends Phaser.Scene {
     );
   };
 
+  /** Persist a mid-run checkpoint (dusk/dawn/pause/periodic). */
+  checkpointSave() {
+    if (this.won || !this.player?.alive || this.camp.hp <= 0) return;
+    try {
+      saveRunSnapshot(this.buildRunSnapshot());
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private buildRunSnapshot(): RunSnapshot {
+    return {
+      v: 1,
+      savedAt: Date.now(),
+      worldSeed: this.world.seed,
+      runTime: this.dayNight.runTime,
+      dayNumber: this.dayNight.dayNumber,
+      graceLeft: this.graceLeft,
+      mutators: [...this.mutators],
+      winGoal: this.winGoal,
+      assaultIndex: this.assault.index,
+      assaultTimer: this.assault.timer,
+      player: {
+        x: this.player.x,
+        y: this.player.y,
+        hp: this.player.hp,
+        maxHp: this.player.maxHp,
+        level: this.player.level,
+        xp: this.player.xp,
+        wood: this.player.wood,
+        meat: this.player.meat,
+        gold: this.player.gold,
+        treesChopped: this.player.treesChopped,
+        woodCollected: this.player.woodCollected,
+        meatCollected: this.player.meatCollected,
+        goldCollected: this.player.goldCollected,
+        campUpgrades: this.player.campUpgrades,
+        kills: this.player.kills,
+        bosses: this.player.bosses,
+        raidsSurvived: this.player.raidsSurvived,
+        rerollsLeft: this.player.rerollsLeft,
+        banishesLeft: this.player.banishesLeft,
+        equipment: { ...this.player.equipment } as Record<string, unknown>,
+      },
+      arsenal: {
+        weapons: { ...this.arsenal.weapons },
+        weaponOrder: [...this.arsenal.weaponOrder],
+        weaponElements: { ...this.arsenal.weaponElements },
+        weaponUnique: { ...this.arsenal.weaponUnique },
+        passives: { ...this.arsenal.passives },
+        usedElements: { ...this.arsenal.usedElements },
+        banished: [...this.arsenal.banished],
+      },
+      camp: {
+        levels: { ...this.camp.levels },
+        hp: this.camp.hp,
+        maxHp: this.camp.maxHp,
+        wallHps: this.camp.walls.map((w) => w.hp),
+      },
+      poisUsed: this.world.pois.filter((p) => p.used).map((p) => p.id),
+      pois: this.world.pois.map((p) => ({
+        id: p.id,
+        kind: p.kind,
+        x: p.x,
+        y: p.y,
+        used: p.used,
+      })),
+    };
+  }
+
+  /** Clear POI sprites and lay down a fresh random landmark set for this morning. */
+  private reshuffleForestLandmarks() {
+    this.poiSprites.forEach((s) => s.destroy());
+    this.poiSprites.clear();
+    this.poiPrompt?.setVisible(false);
+    this.world.reshufflePois(this.dayNight.dayNumber);
+  }
+
+  private applyRunSnapshot(snap: RunSnapshot) {
+    this.dayNight.runTime = snap.runTime;
+    // Force clock/phase refresh.
+    this.dayNight.update(0);
+    this.graceLeft = snap.graceLeft;
+    const p = this.player;
+    Object.assign(p, {
+      x: snap.player.x,
+      y: snap.player.y,
+      hp: snap.player.hp,
+      maxHp: snap.player.maxHp,
+      level: snap.player.level,
+      xp: snap.player.xp,
+      wood: snap.player.wood,
+      meat: snap.player.meat,
+      gold: snap.player.gold,
+      treesChopped: snap.player.treesChopped,
+      woodCollected: snap.player.woodCollected,
+      meatCollected: snap.player.meatCollected,
+      goldCollected: snap.player.goldCollected,
+      campUpgrades: snap.player.campUpgrades,
+      kills: snap.player.kills,
+      bosses: snap.player.bosses,
+      raidsSurvived: snap.player.raidsSurvived,
+      rerollsLeft: snap.player.rerollsLeft,
+      banishesLeft: snap.player.banishesLeft,
+    });
+    p.equipment = { ...emptyEquipment(), ...(snap.player.equipment as object) } as typeof p.equipment;
+    this.arsenal.weapons = { ...snap.arsenal.weapons };
+    this.arsenal.weaponOrder = [...snap.arsenal.weaponOrder];
+    this.arsenal.weaponElements = { ...snap.arsenal.weaponElements } as typeof this.arsenal.weaponElements;
+    this.arsenal.weaponUnique = { ...snap.arsenal.weaponUnique };
+    this.arsenal.passives = { ...snap.arsenal.passives };
+    this.arsenal.usedElements = { ...snap.arsenal.usedElements };
+    this.arsenal.banished = new Set(snap.arsenal.banished);
+    this.camp.levels = { ...this.camp.levels, ...snap.camp.levels };
+    this.camp.recompute();
+    this.camp.hp = snap.camp.hp;
+    this.camp.maxHp = Math.max(this.camp.maxHp, snap.camp.maxHp);
+    for (let i = 0; i < this.camp.walls.length; i++) {
+      const hp = snap.camp.wallHps[i];
+      if (hp == null) continue;
+      this.camp.walls[i].hp = hp;
+      this.camp.walls[i].alive = hp > 0;
+      for (const s of this.camp.walls[i].sprites) {
+        s.setVisible(true).setAlpha(hp > 0 ? 1 : 0.35);
+        if (hp <= 0) s.setTint(0x5e4128);
+        else s.clearTint();
+      }
+    }
+    this.poiSprites.forEach((s) => s.destroy());
+    this.poiSprites.clear();
+    this.poiPrompt?.setVisible(false);
+    if (snap.pois?.length) {
+      this.world.loadPois(snap.pois);
+    } else {
+      // Older saves: reshape for the resumed day, then mark used IDs if they still match.
+      if (snap.dayNumber > 1) this.world.reshufflePois(snap.dayNumber);
+      const used = new Set(snap.poisUsed || []);
+      for (const poi of this.world.pois) {
+        if (used.has(poi.id)) poi.used = true;
+      }
+    }
+    this.playerSprite.setPosition(p.x, p.y);
+    this.cameras.main.centerOn(p.x, p.y);
+    recomputePlayerStats(p, this.arsenal, this.metaBonuses);
+    this.applyMutatorPlayerMods();
+    p.hp = Math.min(p.hp, p.maxHp);
+  }
+
+  endRunVictory() {
+    this.paused = true;
+    clearRunSnapshot();
+    Audio.playSfx('upgrade');
+    const goal = WIN_GOAL_BY_ID[this.winGoal];
+    if (goal.badge) meta.unlockBadge(goal.badge);
+    if (this.winGoal === 'easy') this.tryUnlockAchievement('win_easy');
+    else if (this.winGoal === 'medium') this.tryUnlockAchievement('win_medium');
+    else if (this.winGoal === 'hard') this.tryUnlockAchievement('win_hard');
+    const runTime = this.dayNight.runTime;
+    const p = this.player;
+    const campDev = Object.values(this.camp.levels).reduce((s, n) => s + (n || 0), 0);
+    const creditStats = {
+      day: this.dayNight.dayNumber,
+      level: p.level,
+      kills: p.kills,
+      raids: p.raidsSurvived,
+      bosses: p.bosses,
+      time: runTime,
+      trees: p.treesChopped,
+      wood: p.woodCollected,
+      meat: p.meatCollected,
+      gold: p.goldCollected,
+      campLevel: this.camp.levels.camp || 0,
+      campUpgrades: p.campUpgrades,
+      campDev,
+      creditMult: this.mutatorFx.creditMult,
+      winBonus: goal.creditBonus,
+    };
+    const credits = meta.completeRun(creditStats);
+    this.ui.hidePause();
+    this.ui.hideLevelUp();
+    this.ui.hideCampShop();
+    this.ui.cancelConfirm();
+    this.ui.banner('Victory!', `${goal.name} cleared — ${goal.badge || 'well fought'}`, goal.color);
+    this.ui.showGameOver(
+      {
+        reason: 'win',
+        time: runTime,
+        day: creditStats.day,
+        level: creditStats.level,
+        kills: creditStats.kills,
+        raids: creditStats.raids,
+        bosses: creditStats.bosses,
+        trees: creditStats.trees,
+        wood: creditStats.wood,
+        meat: creditStats.meat,
+        gold: creditStats.gold,
+        campLevel: creditStats.campLevel,
+        campUpgrades: creditStats.campUpgrades,
+        credits,
+        totalCredits: meta.credits,
+        badge: goal.badge,
+        winLabel: `${goal.name} (${goal.nights} nights)`,
+      },
+      () => {
+        this.ui.cancelConfirm();
+        this.scene.start('MenuScene');
+      },
+    );
+  }
+
   endRun(record: boolean) {
     this.paused = true;
+    clearRunSnapshot();
     // Camp loss (player still alive) — death sting; player death already played hurt→death.
-    if (this.player.alive) Audio.playSfx('death');
+    if (this.player.alive && !this.won) Audio.playSfx('death');
     const runTime = (this.time.now - this.runStart) / 1000;
     const p = this.player;
     const campDev = Object.values(this.camp.levels).reduce((s, n) => s + (n || 0), 0);
@@ -1708,6 +2328,7 @@ export class RunScene extends Phaser.Scene {
       campLevel: this.camp.levels.camp || 0,
       campUpgrades: p.campUpgrades,
       campDev,
+      creditMult: this.mutatorFx.creditMult,
     };
     let credits = 0;
     if (record) {

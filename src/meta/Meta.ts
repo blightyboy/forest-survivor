@@ -1,4 +1,10 @@
 import { clamp } from '../core/math';
+import {
+  ACHIEVEMENT_BY_ID,
+  CODEX_BOSS_MOVE_CREDITS,
+  CODEX_SPECIES_CREDITS,
+  type AchievementId,
+} from '../data/achievements';
 
 const META_STORAGE_KEY = 'forestSurvivor_meta_v1';
 /** Pre-rename key — migrate once so older Electron installs keep progress. */
@@ -11,6 +17,10 @@ function metaSnapshot(meta: MetaProgress) {
     runs: meta.runs,
     bestDay: meta.bestDay,
     totalCreditsEarned: meta.totalCreditsEarned,
+    badges: [...meta.badges],
+    discoveredSpecies: [...meta.discoveredSpecies],
+    discoveredBossMoves: [...meta.discoveredBossMoves],
+    achievements: [...meta.achievements],
   };
 }
 
@@ -175,6 +185,10 @@ export type RunCreditStats = {
   campUpgrades?: number;
   /** Sum of all camp structure levels (development). */
   campDev?: number;
+  /** Mutator credit multiplier (e.g. Savage). */
+  creditMult?: number;
+  /** Flat bonus on victory (win milestone). */
+  winBonus?: number;
 };
 
 /**
@@ -214,7 +228,9 @@ export function calcRunCredits(stats: RunCreditStats) {
     campDev * 2.5 +
     campUpgrades * 1.5;
 
-  return Math.max(8, Math.floor(raw));
+  const mult = Math.max(0.5, stats.creditMult || 1);
+  const bonus = Math.max(0, stats.winBonus || 0);
+  return Math.max(8, Math.floor(raw * mult) + bonus);
 }
 
 export class MetaProgress {
@@ -223,6 +239,14 @@ export class MetaProgress {
   runs = 0;
   bestDay = 0;
   totalCreditsEarned = 0;
+  /** Victory badges earned (win-goal titles). */
+  badges: string[] = [];
+  /** Species ids seen at least once (codex). */
+  discoveredSpecies: string[] = [];
+  /** True-boss move ids logged from telegraphs / kills. */
+  discoveredBossMoves: string[] = [];
+  /** Earned achievement ids. */
+  achievements: string[] = [];
 
   constructor() {
     this.load();
@@ -244,9 +268,79 @@ export class MetaProgress {
         }
       }
       this.levels = levels;
+      if (Array.isArray(data.badges)) {
+        this.badges = data.badges.filter((b): b is string => typeof b === 'string');
+      }
+      if (Array.isArray(data.discoveredSpecies)) {
+        this.discoveredSpecies = data.discoveredSpecies.filter((s): s is string => typeof s === 'string');
+      }
+      if (Array.isArray(data.discoveredBossMoves)) {
+        this.discoveredBossMoves = data.discoveredBossMoves.filter(
+          (s): s is string => typeof s === 'string',
+        );
+      }
+      if (Array.isArray(data.achievements)) {
+        this.achievements = data.achievements.filter((s): s is string => typeof s === 'string');
+      }
     } catch {
       /* corrupt */
     }
+  }
+
+  /** Unlock a victory badge if new; returns true when newly earned. */
+  unlockBadge(badge: string) {
+    if (!badge || this.badges.includes(badge)) return false;
+    this.badges.push(badge);
+    this.save();
+    return true;
+  }
+
+  hasSpecies(id: string) {
+    return this.discoveredSpecies.includes(id);
+  }
+
+  hasBossMove(id: string) {
+    return this.discoveredBossMoves.includes(id);
+  }
+
+  hasAchievement(id: string) {
+    return this.achievements.includes(id);
+  }
+
+  private grantCredits(n: number) {
+    const amt = Math.max(0, Math.floor(n));
+    if (amt <= 0) return 0;
+    this.credits += amt;
+    this.totalCreditsEarned += amt;
+    return amt;
+  }
+
+  /** First kill of a species → codex unlock + credits. */
+  discoverSpecies(id: string): { credits: number } | null {
+    if (!id || this.hasSpecies(id)) return null;
+    this.discoveredSpecies.push(id);
+    const credits = this.grantCredits(CODEX_SPECIES_CREDITS);
+    this.save();
+    return { credits };
+  }
+
+  /** First sighting of a true-boss signature move. */
+  discoverBossMove(id: string): { credits: number } | null {
+    if (!id || this.hasBossMove(id)) return null;
+    this.discoveredBossMoves.push(id);
+    const credits = this.grantCredits(CODEX_BOSS_MOVE_CREDITS);
+    this.save();
+    return { credits };
+  }
+
+  /** Unlock an achievement if new; grants its credit reward. */
+  unlockAchievement(id: AchievementId): { credits: number; name: string } | null {
+    const def = ACHIEVEMENT_BY_ID[id];
+    if (!def || this.hasAchievement(id)) return null;
+    this.achievements.push(id);
+    const credits = this.grantCredits(def.credits);
+    this.save();
+    return { credits, name: def.name };
   }
 
   save() {

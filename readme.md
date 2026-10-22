@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.2.3-alpha-build`
+Version: `0.2.4-alpha-build`
 
 A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + Vite, packaged with Electron. Play as a lumberjack in a hostile forest: chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids.
 
@@ -28,6 +28,10 @@ A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + V
 | Blacksmith gear slots | **14** |
 | Gear quality tiers | **6** (Poor → Legendary) |
 | Permanent meta upgrades | **15** |
+| Achievements | **10** (permanent credit rewards) |
+| World landmarks (POIs) | **4** kinds (den, wagon, shrine, vein; dawn reshuffle) |
+| Run mutators | **5** (stackable challenges) |
+| Win goals | **4** (Endless / Easy 6 / Medium 12 / Hard 18) |
 | Coach tutorials | **11** |
 | Opening grace | **30s** (peaceful wildlife; assaults/bosses held) |
 | Veterancy | up to **15★** (bronze → silver → gold) |
@@ -43,9 +47,16 @@ Threat grows over time. Beasts gain **veterancy stars** and can roll **elements*
 ### Core loop
 
 1. **Chop & hunt** — fell trees, mine ore, defeat wildlife for resources and XP.
-2. **Level up** — choose from the **40**-kind card pool (weapons, passives, infusions, bonuses).
-3. **Fortify** — upgrade the camp (**11** buildings), towers, production, and blacksmith.
-4. **Survive the cycle** — daytime assault waves, dusk warnings, then night raids (miniboss most nights; true boss every **3rd** night).
+2. **Explore landmarks** — dens, wagons, shrines, and rich veins (**E** nearby; reshuffle each dawn).
+3. **Level up** — choose from the **40**-kind card pool (weapons, passives, infusions, bonuses; **max 5** weapons).
+4. **Fortify** — upgrade the camp (**11** buildings), towers, production, and blacksmith.
+5. **Survive the cycle** — daytime assault waves, dusk warnings, then night raids (miniboss most nights; true boss every **3rd** night with elite guards).
+
+Optional **run mutators** on the main menu (Savage, No Grace, Glass, Siege, Scarcity) stack and persist between sessions.
+
+Optional **win goals**: Endless, Easy (6 nights), Medium (12), Hard (18). Survive the final gauntlet night for a badge and bonus credits. Mid-run **checkpoints** save at dusk/dawn/pause; pause **Save & Quit** keeps Continue available.
+
+**Raid telegraphs** show wave species (text + color pills). True bosses announce signature moves with **icons** on the HUD.
 
 ### Opening grace
 
@@ -82,11 +93,11 @@ Cabin and walls fully repair at dawn if you survive the night.
 
 ### Tutorials & glossary
 
-**11** coach tips can spotlight HUD and world targets each run while Tutorials are On (Options). After a run you can turn them off. The in-menu **Glossary** covers beasts, cards, buildings, and world systems.
+**11** coach tips can spotlight HUD and world targets each run while Tutorials are On (Options). After a run you can turn them off. The in-menu **Glossary** covers beasts (codex unlocks on first kill), cards, buildings, world systems, and **achievements**.
 
 ### Meta progress
 
-Credits at end of run buy **15** permanent character upgrades (vitality, damage, rerolls, banishes, walls, towers, smith luck, and more). Saved via Electron `userData` (`forestSave`).
+Credits at end of run buy **15** permanent character upgrades (vitality, damage, rerolls, banishes, walls, towers, smith luck, and more). **Codex discoveries** and **achievements** also grant small permanent credit rewards. Saved via Electron `userData` (`forestSave`).
 
 ---
 
@@ -96,11 +107,12 @@ Credits at end of run buy **15** permanent character upgrades (vitality, damage,
 |---|---|
 | **WASD** / stick | Move |
 | **Space** / **Shift** | Dash |
+| **E** | Interact with landmark (den, wagon, shrine, vein) |
 | **F** | Aim lock (nearest foe) |
 | **U** | Camp build panel |
 | **B** | Blacksmith tab |
 | **1–5** | Pick a level-up card |
-| **Esc** / **P** | Pause / resume |
+| **Esc** / **P** | Pause / character sheet (Save & Quit or Abandon) |
 | **M** | Mute / unmute |
 | **R** | Reroll cards (when available) |
 
@@ -148,9 +160,9 @@ Outputs under `dist/`. Packaged app loads `dist-web/` (Phaser build). Auto-updat
 │   ├── main.ts             # Phaser boot
 │   ├── scenes/             # Boot, Menu, Run
 │   ├── systems/            # Combat, animals, arsenal, camp, abilities, day/night
-│   ├── data/               # Species, weapons, passives, shop, tutorials, constants
-│   ├── world/              # Procedural world
-│   ├── meta/               # Credits & permanent upgrades
+│   ├── data/               # Species, weapons, passives, POIs, mutators, win goals, achievements
+│   ├── world/              # Procedural world + biomes
+│   ├── meta/               # Credits, upgrades, mid-run save, codex
 │   ├── ui/                 # DomUI + overlay.css
 │   └── audio/
 ├── electron/               # Main, preload, updater

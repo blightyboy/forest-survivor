@@ -1,7 +1,7 @@
 import { RAID_DISTANCE, compassName } from '../data/constants';
 import { clamp, rand, TAU } from '../core/math';
 import type { AnimalSystem } from './AnimalSystem';
-import type { SpeciesId } from '../data/animals';
+import { SPECIES, type SpeciesId } from '../data/animals';
 
 type QueueSpec = { species: SpeciesId; big?: boolean };
 
@@ -16,6 +16,10 @@ export class AssaultSystem {
   angle = 0;
   queue: QueueSpec[] = [];
   alive = 0;
+  /** Mutator: wave size multiplier. */
+  waveMult = 1;
+  /** Mutator: timer multiplier (<1 = faster waves). */
+  timerMult = 1;
 
   update(
     dt: number,
@@ -30,7 +34,7 @@ export class AssaultSystem {
     raidActive: boolean,
     /** Start-of-run calm — no daytime assault waves until it ends. */
     graceLeft: number,
-    onBanner: (title: string, sub: string, color: string) => void,
+    onBanner: (title: string, sub: string, color: string, topSpecies?: string[]) => void,
   ) {
     if (isNight || raidActive || graceLeft > 0) {
       this.queue.length = 0;
@@ -63,11 +67,12 @@ export class AssaultSystem {
   private startWave(
     threatM: number,
     threatHp: number,
-    onBanner: (title: string, sub: string, color: string) => void,
+    onBanner: (title: string, sub: string, color: string, topSpecies?: string[]) => void,
   ) {
     this.index++;
     const m = threatM;
-    const size = Math.min(22, Math.round(3 + m * 1.35 + Math.pow(Math.max(0, m - 1), 1.2) * 0.45));
+    const rawSize = 3 + m * 1.35 + Math.pow(Math.max(0, m - 1), 1.2) * 0.45;
+    const size = Math.min(28, Math.round(rawSize * this.waveMult));
     const pool = this.speciesPool(m);
     const queue: QueueSpec[] = [];
     for (let i = 0; i < size; i++) {
@@ -78,12 +83,14 @@ export class AssaultSystem {
     this.angle = Math.random() * TAU;
     this.queue = queue;
     this.spawnT = 0;
-    this.timer = Math.max(28, 72 - m * 5.5 + rand(-4, 6));
+    this.timer = Math.max(18, (72 - m * 5.5 + rand(-4, 6)) * this.timerMult);
     const dir = compassName(this.angle);
+    const { hint, top } = summarizeWaveSpecies(queue);
     onBanner(
       `Assault wave ${this.index}!`,
-      `${size} beasts advance from the ${dir} · Threat x${threatHp.toFixed(1)}`,
+      `${size} from the ${dir} · ${hint} · Threat x${threatHp.toFixed(1)}`,
       '#ff9a6b',
+      top,
     );
   }
 
@@ -132,4 +139,20 @@ export class AssaultSystem {
       return;
     }
   }
+}
+
+/** Short species telegraph for banners (top counts). */
+function summarizeWaveSpecies(queue: QueueSpec[]): { hint: string; top: string[] } {
+  const counts = new Map<string, number>();
+  for (const q of queue) counts.set(q.species, (counts.get(q.species) || 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  if (!ranked.length) return { hint: 'mixed beasts', top: [] };
+  const top = ranked.map(([sp]) => sp);
+  const hint = ranked
+    .map(([sp, n]) => {
+      const label = SPECIES[sp as SpeciesId]?.name || sp;
+      return n > 1 ? `${n}× ${label}` : label;
+    })
+    .join(', ');
+  return { hint, top };
 }

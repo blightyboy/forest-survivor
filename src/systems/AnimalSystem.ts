@@ -47,6 +47,7 @@ import {
 } from './EnemyAbilities';
 import type { FxSystem } from './FxSystem';
 import { ellipse } from '../art/draw/primitives';
+import { BIOME_SPAWN_WEIGHTS, type BiomeId } from '../data/biomes';
 
 export const MAX_ANIMALS = 80;
 
@@ -190,9 +191,13 @@ export class AnimalSystem {
   vfx: FxSystem | null = null;
   worldCenter = { x: 2400, y: 2400 };
   worldSize = { w: 4800, h: 4800 };
+  /** Optional biome sampler from World.biomeAt. */
+  biomeAt: ((x: number, y: number) => BiomeId) | null = null;
   /** Reject spawn points inside the camp yard (legacy spawnInBase). */
   spawnBlocked: (x: number, y: number) => boolean = () => false;
   onDayBoss?: (name: string) => void;
+  /** Fired once per animal death after kill bookkeeping (codex / achievements). */
+  onBeastKilled?: (a: AnimalEntity) => void;
   onPlayerHurt?: () => void;
   onSwarm?: (label: string, count: number, tint: string) => void;
 
@@ -566,6 +571,88 @@ export class AnimalSystem {
     return { x, y };
   }
 
+  /**
+   * Elite bodyguards when a boss appears — raid the camp and hunt the player.
+   * Count, stars, and species weight scale with threat.
+   */
+  spawnBossGuards(
+    kind: 'true' | 'mini' | 'day',
+    nearX: number,
+    nearY: number,
+    threatM: number,
+    dayNumber: number,
+  ): number {
+    const m = Math.max(0, threatM);
+    let count =
+      kind === 'true'
+        ? 3 + Math.floor(m * 1.35)
+        : kind === 'mini'
+          ? 1 + Math.floor(m * 0.75)
+          : 2 + Math.floor(m * 1.05);
+    const cap = kind === 'true' ? 7 : kind === 'mini' ? 4 : 5;
+    const floor = kind === 'true' ? 3 : kind === 'mini' ? 1 : 2;
+    count = clamp(count, floor, cap);
+
+    const starFloor = clamp(
+      2 + Math.floor(m * 1.15) + (kind === 'true' ? 2 : kind === 'day' ? 1 : 0),
+      2,
+      12,
+    );
+    const hpBoost = 1.35 + m * 0.22 + (kind === 'true' ? 0.25 : 0) + dayNumber * 0.04;
+    const dmgBoost = 1.25 + m * 0.14 + (kind === 'true' ? 0.15 : 0) + dayNumber * 0.03;
+
+    const pool: SpeciesId[] =
+      m >= 4 || dayNumber >= 5
+        ? ['wolf', 'dire_wolf', 'boar', 'dire_boar', 'bear', 'dire_bear']
+        : m >= 2 || dayNumber >= 3
+          ? ['wolf', 'dire_wolf', 'boar', 'dire_boar']
+          : ['wolf', 'boar', 'dire_wolf'];
+
+    this.ensureSpawnSlots(count + 1, { x: nearX, y: nearY });
+    let spawned = 0;
+    for (let i = 0; i < count; i++) {
+      if (this.animals.length >= MAX_ANIMALS) break;
+      const species = pool[Math.floor(Math.random() * pool.length)];
+      const ang = (i / count) * TAU + rand(-0.25, 0.25);
+      const dist = rand(70, 140);
+      let x = nearX + Math.cos(ang) * dist;
+      let y = nearY + Math.sin(ang) * dist;
+      if (this.spawnBlocked(x, y)) {
+        const far = this.findEnemySpawn(nearX, nearY, 90, 200, 18);
+        if (!far) continue;
+        x = far.x;
+        y = far.y;
+      }
+      const direBias = clamp(0.25 + m * 0.12, 0.25, 0.75);
+      const variant =
+        species.startsWith('dire_') || Math.random() < direBias
+          ? m >= 5 && Math.random() < 0.35
+            ? 'demonic'
+            : 'dire'
+          : undefined;
+      const stars = clamp(starFloor + Math.floor(Math.random() * 3), 2, 15);
+      const guard = this.spawn(species, x, y, {
+        raider: true,
+        threatM: m,
+        stars,
+        variant,
+        big: isBoarish(species) && Math.random() < 0.35 + m * 0.05,
+        mult: {
+          hp: (1 + 0.4 * m) * hpBoost,
+          dmg: (1 + 0.16 * m) * dmgBoost,
+          speed: Math.min(1.55, 1.08 + 0.03 * m),
+        },
+        displayName: `Elite ${SPECIES[species]?.name || species}`,
+      });
+      if (guard) {
+        // Stay sticky on player / camp — wider hunt radius than normal raiders.
+        guard.aggro *= 1.35;
+        spawned++;
+      }
+    }
+    return spawned;
+  }
+
   /** Night miniboss(es) — every non-boss night. Returns how many spawned. */
   spawnMiniboss(
     dayNumber: number,
@@ -606,7 +693,10 @@ export class AnimalSystem {
         dmgMult: 1.4 + 0.12 * dayNumber,
         displayName: BOSS_NAMES[species],
       });
-      if (boss) spawned++;
+      if (boss) {
+        spawned++;
+        this.spawnBossGuards('mini', boss.x, boss.y, threatM, dayNumber);
+      }
     }
     return spawned;
   }
@@ -631,7 +721,7 @@ export class AnimalSystem {
     if (!spot) return null;
     const dire = species.startsWith('dire_');
     const hp = Math.round(SPECIES[species].hp * (42 + dayNumber * 10) * (1 + 0.4 * threatM) * (dire ? 0.9 : 1));
-    return this.spawn(species, spot.x, spot.y, {
+    const boss = this.spawn(species, spot.x, spot.y, {
       trueBoss: true,
       boss: true,
       raider: true,
@@ -640,6 +730,8 @@ export class AnimalSystem {
       dmgMult: 1.8 + 0.15 * dayNumber,
       displayName: BOSS_NAMES[species] || SPECIES[species]?.name,
     });
+    if (boss) this.spawnBossGuards('true', boss.x, boss.y, threatM, dayNumber);
+    return boss;
   }
 
   /** Legacy updateRaid member — spawn one raider on a camp-edge front. */
@@ -705,7 +797,10 @@ export class AnimalSystem {
       hpMult,
       dmgMult,
     });
-    if (boss) this.onDayBoss?.(name);
+    if (boss) {
+      this.spawnBossGuards('day', boss.x, boss.y, threatM, dayNumber);
+      this.onDayBoss?.(name);
+    }
   }
 
   tryDayBossFromKill(a: AnimalEntity, ctx: KillContext) {
@@ -729,43 +824,18 @@ export class AnimalSystem {
     this.spawnDayBoss(kind, a.x, a.y, ctx.dayNumber, ctx.threatM);
   }
 
-  /** Legacy updateSpawning — day/night mix + ambient soft-cap. */
-  spawnAmbient(px: number, py: number, threatM: number, isNight: boolean, dayNumber: number) {
+  /** Ambient wildlife — pool gated by day number + threat, not day/night phase. */
+  spawnAmbient(px: number, py: number, threatM: number, dayNumber: number) {
     let ambient = 0;
     for (const a of this.animals) {
       if (!a.dead && !a.raider && !a.leaving && !a.swarm && !a.boss) ambient++;
     }
     if (ambient >= Math.min(80, 46 + dayNumber * 4)) return;
 
-    const r = Math.random();
-    let species: SpeciesId;
-    let count = 1;
-    if (isNight) {
-      if (r < (dayNumber >= 2 ? 0.52 : 0.28)) {
-        species = dayNumber >= 4 && Math.random() < 0.18 ? 'dire_wolf' : 'wolf';
-        count = 2 + Math.floor(Math.random() * (dayNumber >= 3 ? 4 : 2));
-      } else if (r < 0.68 || dayNumber < 2) {
-        species = dayNumber >= 3 && Math.random() < 0.14 ? 'dire_boar' : 'boar';
-      } else if (r < 0.82) {
-        species = Math.random() < 0.55 ? 'beaver' : 'sheep';
-      } else {
-        species = dayNumber >= 5 && Math.random() < 0.2 ? 'dire_bear' : 'bear';
-      }
-    } else if (r < 0.1) species = 'deer';
-    else if (r < 0.18) species = 'fox';
-    else if (r < 0.28) {
-      species = 'rat';
-      count = 2 + Math.floor(Math.random() * 3);
-    } else if (r < 0.38) species = 'sheep';
-    else if (r < 0.48) species = 'beaver';
-    else if (r < 0.82 || dayNumber < 2) {
-      species = dayNumber >= 3 && Math.random() < 0.12 ? 'dire_boar' : 'boar';
-    } else {
-      species = dayNumber >= 5 && Math.random() < 0.15 ? 'dire_bear' : 'bear';
-    }
-
     const spot = this.findEnemySpawn(px, py, 720, 1300, 30);
     if (!spot) return;
+    const biome = this.biomeAt?.(spot.x, spot.y) ?? 'woods';
+    const { species, count } = this.pickAmbientSpecies(dayNumber, threatM, biome);
     const bigChance = clamp(0.08 + threatM * 0.04, 0.08, 0.4);
     for (let i = 0; i < count; i++) {
       if (this.animals.length >= MAX_ANIMALS) break;
@@ -777,6 +847,64 @@ export class AnimalSystem {
         big: isBoarish(species) && species === 'boar' && Math.random() < bigChance,
       });
     }
+  }
+
+  /** Weighted ambient pick — predators unlock via day/threat; biome tilts the table. */
+  private pickAmbientSpecies(
+    dayNumber: number,
+    threatM: number,
+    biome: 'clearing' | 'woods' | 'pine' = 'woods',
+  ): { species: SpeciesId; count: number } {
+    const n = dayNumber;
+    const wolvesOk = n >= 2 || threatM >= 0.8;
+    const bearsOk = n >= 3 || threatM >= 4.5;
+    const biomeMul = BIOME_SPAWN_WEIGHTS[biome] || {};
+
+    const pool: { sp: SpeciesId; w: number; pack?: [number, number] }[] = [
+      { sp: 'deer', w: 0.1 * (biomeMul.deer ?? 1) },
+      { sp: 'fox', w: 0.08 * (biomeMul.fox ?? 1) },
+      { sp: 'rat', w: 0.1 * (biomeMul.rat ?? 1), pack: [2, 4] },
+      { sp: 'sheep', w: 0.1 * (biomeMul.sheep ?? 1) },
+      { sp: 'beaver', w: 0.1 * (biomeMul.beaver ?? 1) },
+      { sp: 'boar', w: 0.34 * (biomeMul.boar ?? 1) },
+    ];
+    if (wolvesOk) {
+      pool.push({
+        sp: 'wolf',
+        w: (0.28 + Math.min(0.2, threatM * 0.04)) * (biomeMul.wolf ?? 1),
+        pack: [2, n >= 3 ? 5 : 3],
+      });
+    }
+    if (bearsOk) {
+      pool.push({
+        sp: 'bear',
+        w: (0.14 + Math.min(0.1, threatM * 0.02)) * (biomeMul.bear ?? 1),
+      });
+    }
+
+    let total = 0;
+    for (const e of pool) total += e.w;
+    let roll = Math.random() * total;
+    let pick = pool[0];
+    for (const e of pool) {
+      roll -= e.w;
+      if (roll < 0) {
+        pick = e;
+        break;
+      }
+    }
+
+    let species = pick.sp;
+    if (species === 'boar' && n >= 3 && Math.random() < 0.12 + Math.min(0.08, threatM * 0.02)) species = 'dire_boar';
+    else if (species === 'wolf' && n >= 4 && Math.random() < 0.16 + Math.min(0.08, threatM * 0.02)) species = 'dire_wolf';
+    else if (species === 'bear' && n >= 5 && Math.random() < 0.18 + Math.min(0.08, threatM * 0.02)) species = 'dire_bear';
+
+    let count = 1;
+    if (pick.pack) {
+      const [lo, hi] = pick.pack;
+      count = lo + Math.floor(Math.random() * (hi - lo + 1));
+    }
+    return { species, count };
   }
 
   /** Legacy startSwarm — pest packs from every side. */
@@ -949,6 +1077,7 @@ export class AnimalSystem {
     a.dead = true;
     player.kills++;
     if (a.boss) player.bosses++;
+    this.onBeastKilled?.(a);
     if (!this.combat?.nuking) {
       Audio.playSfx(a.boss ? 'roar' : 'boarDie');
       // Legacy onAnimalKilled shake — routed through Combat so Options shakeScale applies.
@@ -1232,7 +1361,7 @@ export class AnimalSystem {
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
       this.spawnTimer = 1.6;
-      if (player.alive && !raidActive) this.spawnAmbient(player.x, player.y, threatM, isNight, dayNumber);
+      if (player.alive && !raidActive) this.spawnAmbient(player.x, player.y, threatM, dayNumber);
     }
 
     this.swarmTimer -= dt;

@@ -265,9 +265,10 @@ export function generateItem(opts: GenerateItemOpts = {}): GearItem {
   return item;
 }
 
-export function refreshShopStock(forgeLevel: number, smithLuck = 0): GearItem[] {
+export function refreshShopStock(forgeLevel: number, smithLuck = 0, stockMult = 1): GearItem[] {
   const boost = Math.max(0, (forgeLevel || 1) - 1) * 0.55 + (smithLuck || 0);
-  const count = Math.min(8, 4 + Math.floor((forgeLevel || 1) / 2));
+  const base = Math.min(8, 4 + Math.floor((forgeLevel || 1) / 2));
+  const count = Math.max(2, Math.round(base * Math.max(0.4, stockMult)));
   const used = new Set<ItemSlot>();
   const items: GearItem[] = [];
   for (let i = 0; i < count; i++) {

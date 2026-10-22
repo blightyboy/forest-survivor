@@ -18,6 +18,7 @@ import {
   STAR_SPEED,
   STAR_XP,
   STAR_LOOT,
+  MAX_WEAPONS,
 } from '../data/constants';
 import { ITEM_SLOTS, SLOT_LABELS, type GearItem } from '../data/shop';
 import { WEAPON_DEFS, UNIQUE_NAMES, uniqueWeaponName } from '../data/weapons';
@@ -26,17 +27,22 @@ import { SPECIES, AGGRO_RANGE_MULT, BOSS_NAMES, ANIMAL_VARIANTS, VARIANT_IDS } f
 import { META_UPGRADES, meta as metaProgress, type MetaProgress, type MetaUpgradeId } from '../meta/Meta';
 import { settings, type DisplayMode } from '../meta/Settings';
 import { Audio } from '../audio/Audio';
-import { ICONS, icon } from './icons';
+import { ICONS, icon, weaponIcon } from './icons';
 import type { RunPlayer } from '../run/RunTypes';
 import type { CampSystem } from '../systems/CampSystem';
 import type { DayNightSystem } from '../systems/DayNightSystem';
 import type { ArsenalSystem } from '../systems/ArsenalSystem';
 import {
   BOSS_ABILITY,
+  ELEMENT_ABILITY_BY_ID,
   ELEMENT_ABILITY_POOLS,
   type BossAbilityId,
 } from '../systems/EnemyAbilities';
 import { COACH_STEPS } from '../data/tutorials';
+import { MUTATORS, MUTATOR_BY_ID, mutatorLabelList, type MutatorId } from '../data/mutators';
+import { WIN_GOALS, WIN_GOAL_BY_ID, type WinGoalId } from '../data/winGoals';
+import { ACHIEVEMENTS, type AchievementId } from '../data/achievements';
+import { hasActiveRun } from '../meta/RunSave';
 import type { UpdateInfo } from '../types/global';
 
 const RES_ORDER = ['wood', 'meat', 'gold'] as const;
@@ -79,7 +85,7 @@ export class DomUI {
   onCoachWorldRect?: (key: string) => { x: number; y: number; w: number; h: number } | null;
   /** Legacy #gearHud — bottom-left equipment slot strip. */
   gearHudEl: HTMLElement;
-  /** Legacy #buildWatermark — in-run build version. */
+  /** Legacy #buildWatermark — in-run build version (bottom-right). */
   watermarkEl: HTMLElement;
   optionsEl: HTMLElement;
   tipPopEl: HTMLElement;
@@ -96,6 +102,8 @@ export class DomUI {
   private campPanelOpen = true;
   private campPanelCache = '';
   private campBuilt = false;
+  /** Savage (etc.) — scales threat readout to match run modifiers. */
+  threatHudMult = 1;
   private fpsAcc = 0;
   private fpsFrames = 0;
   private fpsDisplay = 60;
@@ -131,7 +139,7 @@ export class DomUI {
   };
   private tipArsenal: ArsenalSystem | null = null;
   private tipPlayer: RunPlayer | null = null;
-  private glossaryTab: 'beasts' | 'cards' | 'buildings' | 'world' = 'beasts';
+  private glossaryTab: 'beasts' | 'cards' | 'buildings' | 'world' | 'achievements' = 'beasts';
   private menuMuted = false;
   private menuView: 'home' | 'meta' | 'glossary' = 'home';
   private menuMetaRef: MetaProgress = metaProgress;
@@ -147,7 +155,10 @@ export class DomUI {
   onCardReroll?: () => void;
   onResume?: () => void;
   onQuitRun?: () => void;
+  /** Save checkpoint and return to main menu (keep continue). */
+  onSaveQuit?: () => void;
   onMenuPlay?: () => void;
+  onMenuContinue?: () => void;
   onMenuMeta?: () => void;
   onMenuMute?: () => void;
   onMenuOptions?: () => void;
@@ -257,6 +268,7 @@ export class DomUI {
         <div class="fs-res" title="Meat"><span class="fs-ico">${ICONS.meat}</span><strong id="hud-meat">0</strong></div>
         <div class="fs-res" title="Gold"><span class="fs-ico">${ICONS.gold}</span><strong id="hud-gold">0</strong></div>
       </div>
+      <div class="fs-panel fs-mutator-hud hidden" id="hud-mutators" title="Active mutators"></div>
       <div class="fs-panel fs-time" title="Day / night cycle" data-coach="time">
         <div class="fs-clock-top">
           <span class="fs-ico fs-clock-ico" id="hud-phase-ico">${ICONS.sun}</span>
@@ -324,17 +336,41 @@ export class DomUI {
   }
 
   /** Legacy-style center banner (day / raid / assault announcements). */
-  banner(title: string, sub = '', color = '#ffe08a') {
+  banner(title: string, sub = '', color = '#ffe08a', opts?: { subHtml?: string }) {
     const titleEl = this.bannerEl.querySelector('#banner-title') as HTMLElement | null;
     const subEl = this.bannerEl.querySelector('#banner-sub') as HTMLElement | null;
     if (titleEl) {
       titleEl.textContent = title;
       titleEl.style.color = color;
     }
-    if (subEl) subEl.textContent = sub;
+    if (subEl) {
+      if (opts?.subHtml != null) subEl.innerHTML = opts.subHtml;
+      else subEl.textContent = sub;
+    }
     this.bannerEl.classList.remove('hidden');
     if (this.bannerTimer) clearTimeout(this.bannerTimer);
     this.bannerTimer = setTimeout(() => this.bannerEl.classList.add('hidden'), 4200);
+  }
+
+  /** Species color pills for raid / assault telegraphs. */
+  speciesPillsHtml(speciesIds: string[], max = 3): string {
+    const bits: string[] = [];
+    for (const id of speciesIds.slice(0, max)) {
+      const sp = SPECIES[id];
+      if (!sp) continue;
+      bits.push(
+        `<span class="fs-species-pill" style="--sp:${sp.color}" title="${sp.name}">${sp.name}</span>`,
+      );
+    }
+    return bits.length ? `<span class="fs-species-pills">${bits.join('')}</span>` : '';
+  }
+
+  /** Boss move chip with icon (HUD + banners). */
+  bossMoveChipHtml(id: BossAbilityId): string {
+    const def = BOSS_ABILITY[id];
+    if (!def) return '';
+    const ico = icon(id) || this.glossarySwatch(def.color);
+    return `<span class="fs-boss-move" title="${def.name}: ${def.desc}" style="--mov:${def.color || '#ff4d6d'}"><span class="fs-boss-move-ico">${ico}</span><span class="fs-boss-move-name">${def.name}</span></span>`;
   }
 
   /** Top-center event strip — start grace countdown (same slot as banners). */
@@ -362,6 +398,7 @@ export class DomUI {
       maxHp: number;
       element?: string | null;
       bossMoves?: BossAbilityId[];
+      elemMoves?: string[];
       sub?: string;
     } | null,
   ) {
@@ -379,19 +416,22 @@ export class DomUI {
       if (boss.sub != null) {
         sub.textContent = boss.sub;
       } else {
-        // Legacy: element + rolled boss modifiers under the HP bar.
-        const bits: string[] = [];
-        if (boss.element && ELEMENTS[boss.element]) bits.push(ELEMENTS[boss.element].name);
+        // Icon chips for signature + elemental moves (telegraph the kit).
+        const chips: string[] = [];
         if (boss.bossMoves?.length) {
-          bits.push(
-            boss.bossMoves
-              .map((id) => BOSS_ABILITY[id]?.name || id)
-              .filter(Boolean)
-              .join(' · '),
-          );
+          for (const id of boss.bossMoves) chips.push(this.bossMoveChipHtml(id));
         }
-        sub.textContent = bits.length
-          ? bits.join('  —  ')
+        if (boss.elemMoves?.length) {
+          for (const id of boss.elemMoves) {
+            const def = ELEMENT_ABILITY_BY_ID[id];
+            if (!def) continue;
+            chips.push(
+              `<span class="fs-boss-move" title="${def.name}" style="--mov:${def.color || '#c4a35a'}"><span class="fs-boss-move-name">${def.name}</span></span>`,
+            );
+          }
+        }
+        sub.innerHTML = chips.length
+          ? `<div class="fs-boss-moves">${chips.join('')}</div>`
           : `${Math.ceil(boss.hp)} / ${Math.ceil(boss.maxHp)}`;
       }
     }
@@ -842,56 +882,76 @@ export class DomUI {
     this.menuEl.classList.remove('hidden');
     this.menuEl.classList.add('fs-menu-overlay');
     this.menuEl.innerHTML = `
-      <div class="fs-menu-shell interactive">
-        <div id="menu-home" class="fs-menu-view">
-          <div class="fs-menu-brand">Forest Survivor</div>
-          <p class="fs-menu-tagline">Chop, hunt, fortify — survive the forest nights.</p>
-          <div class="fs-menu-credits" id="menu-credits-home">0 Credits</div>
-          <div class="fs-menu-meta-row" id="menu-meta-stats"></div>
-          <button id="btn-play" class="fs-btn big menu-cta" type="button">New Run</button>
-          <button id="btn-meta" class="fs-btn big ghost menu-cta" type="button">Upgrade Character</button>
-          <button id="btn-glossary" class="fs-btn big ghost menu-cta" type="button">Glossary</button>
-          <button id="btn-options" class="fs-btn big ghost menu-cta" type="button">Options</button>
-          <button id="btn-quit" class="fs-btn big ghost menu-cta" type="button">Exit Game</button>
-        </div>
-        <div id="menu-meta" class="fs-menu-view hidden">
-          <header class="fs-menu-meta-head">
-            <button id="btn-meta-back" class="fs-btn small" type="button" title="Back">←</button>
-            <h2>Character Upgrades</h2>
-            <div class="fs-menu-credits" id="menu-credits-meta">0 Credits</div>
-          </header>
-          <p class="fs-menu-meta-hint">Permanent bonuses for every run.</p>
-          <div id="meta-stats" class="fs-meta-stats"></div>
-          <div class="fs-meta-refund-row">
-            <button id="btn-meta-refund" class="fs-btn ghost fs-meta-refund" type="button"
-              title="Reset all upgrades and refund credits spent">
-              Full Refund (<span id="meta-refund-amount">0</span> cr)
+      <div class="fs-menu-layout">
+        <div class="fs-menu-shell interactive">
+          <div id="menu-home" class="fs-menu-view">
+            <div class="fs-menu-brand">Forest Survivor</div>
+            <p class="fs-menu-tagline">Chop, hunt, fortify — survive the forest nights.</p>
+            <div class="fs-menu-credits" id="menu-credits-home">0 Credits</div>
+            <div class="fs-menu-meta-row" id="menu-meta-stats"></div>
+            <div class="fs-mutator-block">
+              <div class="fs-mutator-label">Win goal</div>
+              <div class="fs-mutator-row" id="menu-win-goals"></div>
+            </div>
+            <div class="fs-mutator-block">
+              <div class="fs-mutator-label">Run mutators</div>
+              <div class="fs-mutator-row" id="menu-mutators"></div>
+            </div>
+            <button id="btn-continue" class="fs-btn big menu-cta hidden" type="button">Continue Run</button>
+            <button id="btn-play" class="fs-btn big menu-cta" type="button">New Run</button>
+            <button id="btn-meta" class="fs-btn big ghost menu-cta" type="button">Upgrade Character</button>
+            <button id="btn-glossary" class="fs-btn big ghost menu-cta" type="button">Glossary</button>
+            <button id="btn-options" class="fs-btn big ghost menu-cta" type="button">Options</button>
+            <button id="btn-quit" class="fs-btn big ghost menu-cta" type="button">Exit Game</button>
+          </div>
+          <div id="menu-meta" class="fs-menu-view hidden">
+            <header class="fs-menu-meta-head">
+              <button id="btn-meta-back" class="fs-btn small" type="button" title="Back">←</button>
+              <h2>Character Upgrades</h2>
+              <div class="fs-menu-credits" id="menu-credits-meta">0 Credits</div>
+            </header>
+            <p class="fs-menu-meta-hint">Permanent bonuses for every run.</p>
+            <div id="meta-stats" class="fs-meta-stats"></div>
+            <div class="fs-meta-refund-row">
+              <button id="btn-meta-refund" class="fs-btn ghost fs-meta-refund" type="button"
+                title="Reset all upgrades and refund credits spent">
+                Full Refund (<span id="meta-refund-amount">0</span> cr)
+              </button>
+            </div>
+            <div id="meta-list" class="fs-meta-list"></div>
+          </div>
+          <div id="menu-glossary" class="fs-menu-view hidden">
+            <header class="fs-menu-meta-head">
+              <button type="button" class="fs-btn small" id="btn-glossary-back" title="Back">←</button>
+              <h2>Glossary</h2>
+              <div class="fs-menu-credits fs-glossary-count" id="glossary-count"></div>
+            </header>
+            <div class="fs-glossary-tabs" role="tablist">
+              <button type="button" class="fs-glossary-tab active" data-glossary="beasts">Beasts</button>
+              <button type="button" class="fs-glossary-tab" data-glossary="cards">Cards</button>
+              <button type="button" class="fs-glossary-tab" data-glossary="buildings">Buildings</button>
+              <button type="button" class="fs-glossary-tab" data-glossary="world">World</button>
+              <button type="button" class="fs-glossary-tab" data-glossary="achievements">Achievements</button>
+            </div>
+            <div id="glossary-list" class="fs-glossary-list"></div>
+          </div>
+          <div class="fs-menu-version-row">
+            <button id="menu-version-btn" class="fs-menu-version" type="button" disabled title="Current version">
+              <span id="menu-version-label"></span>
+              <span id="menu-update-badge" class="fs-menu-update-badge hidden">Update available</span>
             </button>
           </div>
-          <div id="meta-list" class="fs-meta-list"></div>
         </div>
-        <div id="menu-glossary" class="fs-menu-view hidden">
-          <header class="fs-menu-meta-head">
-            <button type="button" class="fs-btn small" id="btn-glossary-back" title="Back">←</button>
-            <h2>Glossary</h2>
-            <div class="fs-menu-credits fs-glossary-count" id="glossary-count"></div>
-          </header>
-          <div class="fs-glossary-tabs" role="tablist">
-            <button type="button" class="fs-glossary-tab active" data-glossary="beasts">Beasts</button>
-            <button type="button" class="fs-glossary-tab" data-glossary="cards">Cards</button>
-            <button type="button" class="fs-glossary-tab" data-glossary="buildings">Buildings</button>
-            <button type="button" class="fs-glossary-tab" data-glossary="world">World</button>
-          </div>
-          <div id="glossary-list" class="fs-glossary-list"></div>
-        </div>
-        <div class="fs-menu-version-row">
-          <button id="menu-version-btn" class="fs-menu-version" type="button" disabled title="Current version">
-            <span id="menu-version-label"></span>
-            <span id="menu-update-badge" class="fs-menu-update-badge hidden">Update available</span>
-          </button>
-        </div>
+        <aside id="menu-mutator-detail" class="fs-mutator-detail interactive hidden" aria-live="polite"></aside>
       </div>
     `;
+    this.renderWinGoalChips();
+    this.renderMutatorChips();
+    this.refreshContinueBtn();
+    this.menuEl.querySelector('#btn-continue')?.addEventListener('click', () => {
+      Audio.playSfx('click');
+      this.onMenuContinue?.();
+    });
     this.menuEl.querySelector('#btn-play')?.addEventListener('click', () => {
       Audio.playSfx('click');
       this.onMenuPlay?.();
@@ -921,7 +981,8 @@ export class DomUI {
             | 'beasts'
             | 'cards'
             | 'buildings'
-            | 'world',
+            | 'world'
+            | 'achievements',
         );
       });
     });
@@ -952,6 +1013,14 @@ export class DomUI {
     glossary?.classList.add('hidden');
     shell?.classList.remove('glossary-open');
     this.refreshMenuCredits();
+    this.renderMutatorDetail();
+  }
+
+  private hideMutatorDetail() {
+    const panel = this.menuEl.querySelector('#menu-mutator-detail');
+    const layout = this.menuEl.querySelector('.fs-menu-layout');
+    panel?.classList.add('hidden');
+    layout?.classList.remove('has-mutators');
   }
 
   showMenuMeta(progress?: MetaProgress) {
@@ -969,6 +1038,7 @@ export class DomUI {
     meta?.classList.remove('hidden');
     glossary?.classList.add('hidden');
     shell?.classList.remove('glossary-open');
+    this.hideMutatorDetail();
     this.refreshMenuCredits();
     this.renderMetaPanel();
   }
@@ -983,6 +1053,7 @@ export class DomUI {
     meta?.classList.add('hidden');
     glossary?.classList.remove('hidden');
     shell?.classList.add('glossary-open');
+    this.hideMutatorDetail();
     this.setGlossaryTab(this.glossaryTab || 'beasts');
   }
 
@@ -995,10 +1066,14 @@ export class DomUI {
     if (metaCred) metaCred.textContent = txt;
     const stats = this.menuEl.querySelector('#menu-meta-stats');
     if (stats) {
+      const badgeBit = m.badges?.length
+        ? `<span title="${m.badges.join(', ')}">Badges ${m.badges.length}</span>`
+        : '';
       stats.innerHTML =
         `<span>Runs ${m.runs}</span>` +
         `<span>Best day ${m.bestDay}</span>` +
-        `<span>Earned ${formatNum(m.totalCreditsEarned)}</span>`;
+        `<span>Earned ${formatNum(m.totalCreditsEarned)}</span>` +
+        badgeBit;
     }
   }
 
@@ -1061,13 +1136,28 @@ export class DomUI {
     });
   }
 
-  /** Legacy UI.requestMainMenu */
+  /** Legacy UI.requestMainMenu — abandon without keeping a continue save. */
   requestMainMenu() {
+    this.requestAbandonRun();
+  }
+
+  /** Abandon the run (clears checkpoint) and return to the menu. */
+  requestAbandonRun() {
     this.askConfirm({
-      title: 'Return to main menu?',
-      message: 'Leave this run and go back to the main menu?',
-      confirmLabel: 'Main Menu',
+      title: 'Abandon run?',
+      message: 'End this run and return to the main menu. Progress will not be kept for Continue.',
+      confirmLabel: 'Abandon',
       onConfirm: () => this.onQuitRun?.(),
+    });
+  }
+
+  /** Save checkpoint and quit to the main menu (Continue stays available). */
+  requestSaveQuit() {
+    this.askConfirm({
+      title: 'Save & quit?',
+      message: 'Save your progress and return to the main menu. You can continue this run later.',
+      confirmLabel: 'Save & Quit',
+      onConfirm: () => this.onSaveQuit?.(),
     });
   }
 
@@ -1116,7 +1206,7 @@ export class DomUI {
     this.confirmEl.classList.add('hidden');
   }
 
-  setGlossaryTab(tab: 'beasts' | 'cards' | 'buildings' | 'world') {
+  setGlossaryTab(tab: 'beasts' | 'cards' | 'buildings' | 'world' | 'achievements') {
     this.glossaryTab = tab || 'beasts';
     this.menuEl.querySelectorAll('.fs-glossary-tab').forEach((el) => {
       el.classList.toggle('active', (el as HTMLElement).dataset.glossary === this.glossaryTab);
@@ -1140,6 +1230,20 @@ export class DomUI {
   private glossaryBeastCard(id: string) {
     const sp = SPECIES[id];
     if (!sp) return '';
+    const known = this.menuMetaRef.hasSpecies(id);
+    if (!known) {
+      return `
+      <div class="fs-glossary-card locked">
+        <div class="fs-glossary-icon">${this.glossarySwatch('#3a3228')}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">???</span>
+            <span class="fs-glossary-tag">Undiscovered</span>
+          </div>
+          <div class="fs-glossary-desc">Defeat this beast to unlock its codex entry.</div>
+        </div>
+      </div>`;
+    }
     const tags: string[] = [];
     if (sp.ranged) tags.push('Ranged');
     if (sp.family) tags.push('Dire');
@@ -1392,9 +1496,24 @@ export class DomUI {
   private glossaryBossAbilityCard(id: BossAbilityId) {
     const def = BOSS_ABILITY[id];
     if (!def) return '';
+    const known = this.menuMetaRef.hasBossMove(id);
+    if (!known) {
+      return `
+      <div class="fs-glossary-card locked">
+        <div class="fs-glossary-icon">${this.glossarySwatch('#3a3228')}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">???</span>
+            <span class="fs-glossary-tag">Hidden move</span>
+          </div>
+          <div class="fs-glossary-desc">Face a true boss that uses this signature to unlock it.</div>
+        </div>
+      </div>`;
+    }
+    const ico = icon(id) || this.glossarySwatch(def.color);
     return `
       <div class="fs-glossary-card">
-        <div class="fs-glossary-icon">${this.glossarySwatch(def.color)}</div>
+        <div class="fs-glossary-icon">${ico}</div>
         <div class="fs-glossary-body">
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${def.name}</span>
@@ -1405,6 +1524,23 @@ export class DomUI {
             ${this.glossaryStat('CD', `${def.cd}s`)}
             ${this.glossaryStat('Tele', `${def.tele}s`)}
           </div>
+        </div>
+      </div>`;
+  }
+
+  private glossaryAchievementCard(id: AchievementId) {
+    const def = ACHIEVEMENTS.find((a) => a.id === id);
+    if (!def) return '';
+    const earned = this.menuMetaRef.hasAchievement(id);
+    return `
+      <div class="fs-glossary-card${earned ? '' : ' locked'}">
+        <div class="fs-glossary-icon">${this.glossarySwatch(earned ? '#ffe08a' : '#3a3228')}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">${earned ? def.name : '???'}</span>
+            <span class="fs-glossary-tag">${earned ? `+${def.credits} credits` : 'Locked'}</span>
+          </div>
+          <div class="fs-glossary-desc">${earned ? def.desc : 'Keep exploring to unlock this achievement.'}</div>
         </div>
       </div>`;
   }
@@ -1455,17 +1591,17 @@ export class DomUI {
     let count = 0;
     if (this.glossaryTab === 'beasts') {
       const ids = Object.keys(SPECIES);
+      const knownSpecies = ids.filter((id) => this.menuMetaRef.hasSpecies(id)).length;
+      const bossIds = Object.keys(BOSS_ABILITY) as BossAbilityId[];
+      const knownMoves = bossIds.filter((id) => this.menuMetaRef.hasBossMove(id)).length;
       const variants = VARIANT_IDS.map((id) => this.glossaryVariantCard(id)).join('');
       const elements = ELEMENT_IDS.map((el) => this.glossaryElementCard(el)).join('');
-      const bossMoves = (Object.keys(BOSS_ABILITY) as BossAbilityId[])
-        .map((id) => this.glossaryBossAbilityCard(id))
-        .join('');
+      const bossMoves = bossIds.map((id) => this.glossaryBossAbilityCard(id)).join('');
       const pct = (n: number) => `${Math.round(n * 100)}%`;
-      count =
-        ids.length +
-        VARIANT_IDS.length +
-        ELEMENT_IDS.length +
-        Object.keys(BOSS_ABILITY).length;
+      count = knownSpecies + knownMoves;
+      if (countEl) {
+        countEl.textContent = `Codex ${knownSpecies}/${ids.length} · Moves ${knownMoves}/${bossIds.length}`;
+      }
       html =
         `<div class="fs-glossary-section">Variants</div>
          <p class="fs-glossary-blurb">Any beast can roll a variant. Multipliers stack with
@@ -1485,11 +1621,22 @@ export class DomUI {
         elements +
         `<div class="fs-glossary-section">True-boss moves</div>
          <p class="fs-glossary-blurb">Every 3rd night a true boss leads the raid with two random
-         signature moves from this pool of ten (shown on the boss HUD). Minibosses and day champions
-         use elemental pools instead.</p>` +
+         signature moves from this pool of ten (shown as icons on the boss HUD). Discover moves
+         by facing them. Minibosses and day champions use elemental pools instead.</p>` +
         bossMoves +
-        `<div class="fs-glossary-section">Species</div>` +
+        `<div class="fs-glossary-section">Species (${knownSpecies}/${ids.length})</div>
+         <p class="fs-glossary-blurb">Kill a beast once to unlock its codex entry and earn a small
+         credit reward.</p>` +
         ids.map((id) => this.glossaryBeastCard(id)).join('');
+    } else if (this.glossaryTab === 'achievements') {
+      const earned = ACHIEVEMENTS.filter((a) => this.menuMetaRef.hasAchievement(a.id)).length;
+      count = earned;
+      if (countEl) countEl.textContent = `${earned}/${ACHIEVEMENTS.length} unlocked`;
+      html =
+        `<div class="fs-glossary-section">Achievements</div>
+         <p class="fs-glossary-blurb">Permanent goals across runs. Each grants bonus credits the
+         first time you complete it.</p>` +
+        ACHIEVEMENTS.map((a) => this.glossaryAchievementCard(a.id)).join('');
     } else if (this.glossaryTab === 'cards') {
       const weapons = Object.keys(WEAPON_DEFS);
       const passives = Object.keys(PASSIVE_DEFS);
@@ -1563,6 +1710,42 @@ export class DomUI {
           desc: 'Wood from trees, meat from beasts, gold from ore veins and lucky kills. Spend them at camp to fortify, produce, and gear up at the blacksmith.',
         }),
         this.glossarySimpleCard({
+          name: 'Landmarks (POIs)',
+          tag: 'Explore',
+          color: '#a8e6ff',
+          desc: 'Dens, supply wagons, shrines, and rich veins spawn across the forest. Press E nearby to interact once — dens spawn elites, wagons drop supplies, shrines bless you, veins burst into gold chunks. Each morning the forest shifts: landmarks move and change.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Run mutators',
+          tag: 'Challenge',
+          color: '#ff7a5c',
+          desc: 'Toggle challenges on the main menu before a run: Savage (threat up, more credits), No Grace, Glass cannon, Siege assaults, or Scarcity loot. Stack freely; choices are saved.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Win goals',
+          tag: 'Milestone',
+          color: '#ffe08a',
+          desc: 'Optional finish line: Easy 6 nights, Medium 12, Hard 18. Survive the final gauntlet night for a badge and bonus credits. Endless skips the goal.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Codex & achievements',
+          tag: 'Meta',
+          color: '#a8e6ff',
+          desc: 'First kills unlock species in the Glossary beasts tab for a small credit reward. True-boss moves unlock when you face them. Achievements grant permanent credits — check the Achievements glossary tab.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Biomes',
+          tag: 'World',
+          color: '#6dd46a',
+          desc: 'Density bands create clearings, mixed woods, and dense pine. Wildlife spawn tables tilt by biome — predators favor pine, deer and sheep prefer clearings.',
+        }),
+        this.glossarySimpleCard({
+          name: 'Checkpoints',
+          tag: 'Save',
+          color: '#7fd3ff',
+          desc: 'The run autosaves at dusk, dawn, pause, and periodically. Continue from the main menu to resume seed, day clock, camp, gear, and landmarks.',
+        }),
+        this.glossarySimpleCard({
           name: 'Status effects',
           tag: 'Combat',
           color: '#6dd46a',
@@ -1589,7 +1772,9 @@ export class DomUI {
         UPGRADES.map((def) => this.glossaryBuildingCard(def)).join('');
     }
     list.innerHTML = html;
-    if (countEl) countEl.textContent = `${count} entries`;
+    if (countEl && this.glossaryTab !== 'beasts' && this.glossaryTab !== 'achievements') {
+      countEl.textContent = `${count} entries`;
+    }
   }
 
   private buildOptionsShell() {
@@ -2176,7 +2361,104 @@ export class DomUI {
     this.hideLevelUp();
     this.hideCampShop();
     this.showCampPanelForRun();
-    this.setTip('WASD move · Shift/Space dash · Esc/P pause · U build · B smith · F aim lock · M mute');
+    this.setTip('WASD move · E interact · Shift/Space dash · U build · B smith · F aim lock · Esc pause');
+  }
+
+  refreshContinueBtn() {
+    const btn = this.menuEl.querySelector('#btn-continue') as HTMLButtonElement | null;
+    if (!btn) return;
+    btn.classList.toggle('hidden', !hasActiveRun());
+  }
+
+  renderWinGoalChips() {
+    const row = this.menuEl.querySelector('#menu-win-goals');
+    if (!row) return;
+    const cur = settings.winGoal;
+    row.innerHTML = WIN_GOALS.map((g) => {
+      const on = cur === g.id;
+      return `<button type="button" class="fs-mutator-chip${on ? ' on' : ''}" data-win-goal="${g.id}"
+        style="--mut:${g.color}" title="${g.desc}">${g.name}${g.nights ? ` · ${g.nights}n` : ''}</button>`;
+    }).join('');
+    row.querySelectorAll('[data-win-goal]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.winGoal as WinGoalId;
+        settings.setWinGoal(id);
+        Audio.playSfx('click');
+        this.renderWinGoalChips();
+        this.renderMutatorDetail();
+      });
+    });
+  }
+
+  /** Menu mutator chip row — toggles persist in settings. */
+  renderMutatorChips() {
+    const row = this.menuEl.querySelector('#menu-mutators');
+    if (!row) return;
+    const active = new Set(settings.mutators);
+    row.innerHTML = MUTATORS.map((m) => {
+      const on = active.has(m.id);
+      return `<button type="button" class="fs-mutator-chip${on ? ' on' : ''}" data-mutator="${m.id}"
+        style="--mut:${m.color}" title="${m.desc}">${m.name}</button>`;
+    }).join('');
+    row.querySelectorAll('[data-mutator]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.mutator as MutatorId;
+        settings.toggleMutator(id);
+        Audio.playSfx('click');
+        this.renderMutatorChips();
+      });
+    });
+    this.renderMutatorDetail();
+  }
+
+  /** Right-side panel listing win goal + active mutators for the next run. */
+  renderMutatorDetail() {
+    const panel = this.menuEl.querySelector('#menu-mutator-detail');
+    const layout = this.menuEl.querySelector('.fs-menu-layout');
+    if (!panel) return;
+    const ids = settings.mutators;
+    const goal = WIN_GOAL_BY_ID[settings.winGoal];
+    const showGoal = goal && goal.id !== 'none';
+    if (!ids.length && !showGoal) {
+      panel.classList.add('hidden');
+      panel.innerHTML = '';
+      layout?.classList.remove('has-mutators');
+      return;
+    }
+    layout?.classList.add('has-mutators');
+    panel.classList.remove('hidden');
+    const rows: string[] = [];
+    if (showGoal) {
+      rows.push(`<li class="fs-mutator-detail-row" style="--mut:${goal.color}">
+        <strong>Win · ${goal.name}</strong>
+        <span>${goal.desc}${goal.badge ? ` · Badge: ${goal.badge}` : ''}</span>
+      </li>`);
+    }
+    for (const id of ids) {
+      const m = MUTATOR_BY_ID[id];
+      if (!m) continue;
+      rows.push(`<li class="fs-mutator-detail-row" style="--mut:${m.color}">
+        <strong>${m.name}</strong>
+        <span>${m.desc}</span>
+      </li>`);
+    }
+    panel.innerHTML = `
+      <div class="fs-mutator-detail-title">Next run</div>
+      <p class="fs-mutator-detail-lead">These apply when you start a new run.</p>
+      <ul class="fs-mutator-detail-list">${rows.join('')}</ul>
+    `;
+  }
+
+  setActiveMutators(ids: MutatorId[]) {
+    const el = document.getElementById('hud-mutators');
+    if (!el) return;
+    if (!ids.length) {
+      el.classList.add('hidden');
+      el.textContent = '';
+      return;
+    }
+    el.classList.remove('hidden');
+    el.textContent = mutatorLabelList(ids);
   }
 
   /** Opens the in-menu Character Upgrades view (legacy menuMeta). */
@@ -2358,7 +2640,8 @@ export class DomUI {
     const dayEl = document.getElementById('hud-day');
     if (dayEl) dayEl.textContent = `Day ${day.dayNumber}`;
     const threatEl = document.getElementById('hud-threat');
-    if (threatEl) threatEl.textContent = `Threat x${threat.hp.toFixed(1)}`;
+    const threatMul = this.threatHudMult || 1;
+    if (threatEl) threatEl.textContent = `Threat x${(threat.hp * threatMul).toFixed(1)}`;
     const dayFill = document.getElementById('hud-dayfill');
     if (dayFill) dayFill.style.width = `${Math.max(0, Math.min(1, day.dayBarFrac())) * 100}%`;
     const clock = document.getElementById('hud-clock');
@@ -2462,7 +2745,7 @@ export class DomUI {
       const border = elDef ? `style="border-color:${elDef.color}${unique ? `;box-shadow:0 0 8px ${elDef.color}` : ''}"` : '';
       bits.push(
         `<div class="fs-load ${unique ? 'unique' : ''}" data-tip-kind="weapon" data-tip-id="${id}" ${border}>` +
-          `<span class="fs-load-ico">${icon(id, 'weapon')}</span>` +
+          `<span class="fs-load-ico">${weaponIcon(id, el || null)}</span>` +
           `<span>${unique ? '★' : arsenal.weapons[id]}</span>` +
           (elDef ? `<i class="fs-el-dot" style="background:${elDef.color}"></i>` : '') +
         `</div>`,
@@ -2706,7 +2989,7 @@ export class DomUI {
                 .join('')
             : '';
           return `<article class="fs-pause-card">
-            <div class="fs-pause-card-icon">${icon(id, 'weapon')}</div>
+            <div class="fs-pause-card-icon">${weaponIcon(id, el || null)}</div>
             <div class="fs-pause-card-name"${elDef ? ` style="color:${elDef.color}"` : ''}>${disp}</div>
             <div class="fs-pause-card-tag">${unique ? 'Unique · ' : ''}Lv ${lvl}${elDef ? ' · ' + elDef.name : ''}</div>
             <p class="fs-pause-card-desc">${unique ? `Awakened unique form of ${def?.name || id}.` : (def?.text[0] || '')}</p>
@@ -2749,16 +3032,21 @@ export class DomUI {
       <div class="fs-panel fs-pause-sheet interactive">
         <header class="fs-pause-head">
           <h2>Character Sheet</h2>
-          <div>
+          <div class="fs-pause-actions">
             <button class="fs-btn" id="pause-options">Options</button>
             <button class="fs-btn primary" id="pause-resume">Resume (Esc)</button>
+            <button class="fs-btn" id="pause-save-quit">Save &amp; Quit</button>
             <button class="fs-btn danger" id="pause-quit">Abandon Run</button>
           </div>
         </header>
         <div class="fs-pause-body">
           <section class="fs-pause-sec"><h3>Run</h3>${grid(runRows)}</section>
           <section class="fs-pause-sec"><h3>Combat</h3>${grid(combatRows)}</section>
-          <section class="fs-pause-sec"><h3>Weapons</h3>${weaponsHtml}</section>
+          <section class="fs-pause-sec">
+            <h3>Weapons (${arsenal.weaponOrder.length}/${MAX_WEAPONS})</h3>
+            <p class="fs-pause-note">Only ${MAX_WEAPONS} weapons can be equipped at a time.</p>
+            ${weaponsHtml}
+          </section>
           <section class="fs-pause-sec"><h3>Passives</h3>${passivesHtml}</section>
           <section class="fs-pause-sec"><h3>Gear</h3>${gearHtml}</section>
         </div>
@@ -2766,7 +3054,8 @@ export class DomUI {
     `;
     this.pauseEl.querySelector('#pause-options')?.addEventListener('click', () => this.showOptions('pause'));
     this.pauseEl.querySelector('#pause-resume')?.addEventListener('click', onResume);
-    this.pauseEl.querySelector('#pause-quit')?.addEventListener('click', () => this.requestMainMenu());
+    this.pauseEl.querySelector('#pause-save-quit')?.addEventListener('click', () => this.requestSaveQuit());
+    this.pauseEl.querySelector('#pause-quit')?.addEventListener('click', () => this.requestAbandonRun());
   }
 
   hidePause() {
@@ -2872,7 +3161,7 @@ export class DomUI {
         desc: willUnique
           ? `Awakens as ${uniqName} — stronger stats & elemental look.`
           : def?.text[c.level - 1] || 'Upgrade weapon',
-        icon: icon(c.id, 'weapon'),
+        icon: weaponIcon(c.id, el || null),
         color: willUnique && el && ELEMENTS[el] ? ELEMENTS[el].color : undefined,
       };
     }
@@ -2892,6 +3181,8 @@ export class DomUI {
       const iconKey = ELEMENT_ICON[c.element] || 'ember';
       const atMax = (arsenal?.weapons[c.id] || 0) >= WEAPON_MAX;
       const uniqName = atMax ? uniqueWeaponName(c.id, c.element) : null;
+      // Prefer weapon-shaped elemental art (e.g. Hellhound) when available.
+      const elementalWeaponIco = ICONS[`${c.id}_${c.element}`];
       return {
         title: uniqName || inf?.name || `${el?.name || c.element} infusion`,
         tag: atMax
@@ -2900,7 +3191,7 @@ export class DomUI {
         desc: atMax
           ? `Unlocks ${uniqName}. ${inf?.effect || ''}`
           : inf?.effect || '',
-        icon: icon(iconKey, 'ember'),
+        icon: elementalWeaponIco || icon(iconKey, 'ember'),
         color: el?.color,
       };
     }
@@ -2910,7 +3201,7 @@ export class DomUI {
 
   showGameOver(
     stats: {
-      reason?: 'camp' | 'death';
+      reason?: 'camp' | 'death' | 'win';
       time?: number;
       day: number;
       level: number;
@@ -2925,12 +3216,19 @@ export class DomUI {
       campUpgrades?: number;
       credits: number;
       totalCredits?: number;
+      badge?: string;
+      winLabel?: string;
     },
     onMenu: () => void,
   ) {
     this.hideCampPanel();
     this.gameOverEl.classList.remove('hidden');
-    const title = stats.reason === 'camp' ? 'Camp Destroyed!' : 'You Fainted!';
+    const title =
+      stats.reason === 'win'
+        ? 'Victory!'
+        : stats.reason === 'camp'
+          ? 'Camp Destroyed!'
+          : 'You Fainted!';
     const timeLabel =
       stats.time != null ? `${formatTime(stats.time)} (day ${stats.day})` : `Day ${stats.day}`;
     const rows: [string, string | number][] = [
@@ -2946,12 +3244,15 @@ export class DomUI {
       ['Camp level', stats.campLevel || 0],
       ['Camp upgrades', stats.campUpgrades || 0],
     ];
+    if (stats.winLabel) rows.unshift(['Goal', stats.winLabel]);
+    if (stats.badge) rows.unshift(['Badge', stats.badge]);
     const wallet =
       stats.totalCredits != null
         ? ` · Wallet: ${formatNum(stats.totalCredits)}`
         : '';
+    const winClass = stats.reason === 'win' ? ' fs-go-win' : '';
     this.gameOverEl.innerHTML = `
-      <div class="fs-panel fs-modal interactive">
+      <div class="fs-panel fs-modal interactive${winClass}">
         <h2>${title}</h2>
         <div class="fs-go-stats">
           ${rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}

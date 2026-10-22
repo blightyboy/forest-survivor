@@ -1,4 +1,6 @@
 import { COACH_IDS } from '../data/tutorials';
+import { normalizeMutatorIds, type MutatorId } from '../data/mutators';
+import { normalizeWinGoal, type WinGoalId } from '../data/winGoals';
 
 const SETTINGS_STORAGE_KEY = 'forestSurvivor_settings_v1';
 
@@ -21,6 +23,10 @@ type SettingsData = {
   zoomScale: number;
   tutorialsEnabled: boolean;
   tutorialsSeen: Record<string, boolean>;
+  /** Active run mutators (menu toggles). */
+  mutators: MutatorId[];
+  /** Optional win milestone for the next run. */
+  winGoal: WinGoalId;
 };
 
 /** 60% is the default and max zoom; slider only zooms out from there. */
@@ -41,6 +47,8 @@ const DEFAULTS: SettingsData = {
   zoomScale: ZOOM_SCALE_DEFAULT,
   tutorialsEnabled: true,
   tutorialsSeen: {},
+  mutators: [],
+  winGoal: 'none',
 };
 
 function clampScale(v: unknown, min: number, max: number, fallback: number) {
@@ -68,6 +76,8 @@ class SettingsManager implements SettingsData {
   zoomScale = DEFAULTS.zoomScale;
   tutorialsEnabled = DEFAULTS.tutorialsEnabled;
   tutorialsSeen: Record<string, boolean> = emptyTutorialsSeen();
+  mutators: MutatorId[] = [];
+  winGoal: WinGoalId = 'none';
   returnTo: 'menu' | 'pause' = 'menu';
 
   toJSON(): SettingsData {
@@ -84,6 +94,8 @@ class SettingsManager implements SettingsData {
       zoomScale: this.zoomScale,
       tutorialsEnabled: !!this.tutorialsEnabled,
       tutorialsSeen: { ...this.tutorialsSeen },
+      mutators: [...this.mutators],
+      winGoal: this.winGoal,
     };
   }
 
@@ -126,6 +138,8 @@ class SettingsManager implements SettingsData {
       }
       this.tutorialsSeen = seen;
     }
+    if (data.mutators) this.mutators = normalizeMutatorIds(data.mutators);
+    if (data.winGoal) this.winGoal = normalizeWinGoal(data.winGoal);
   }
 
   save() {
@@ -324,6 +338,24 @@ class SettingsManager implements SettingsData {
   setTutorialsEnabled(on: boolean) {
     this.tutorialsEnabled = !!on;
     if (this.tutorialsEnabled) this.tutorialsSeen = emptyTutorialsSeen();
+    this.save();
+  }
+
+  toggleMutator(id: MutatorId) {
+    const i = this.mutators.indexOf(id);
+    if (i >= 0) this.mutators.splice(i, 1);
+    else this.mutators.push(id);
+    this.mutators = normalizeMutatorIds(this.mutators);
+    this.save();
+  }
+
+  setMutators(ids: MutatorId[]) {
+    this.mutators = normalizeMutatorIds(ids);
+    this.save();
+  }
+
+  setWinGoal(id: WinGoalId) {
+    this.winGoal = normalizeWinGoal(id);
     this.save();
   }
 

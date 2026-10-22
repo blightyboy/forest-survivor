@@ -14,7 +14,7 @@ import type { ElementId } from '../data/constants';
 import { WEAPON_DEFS, type WeaponId } from '../data/weapons';
 import { Audio } from '../audio/Audio';
 import { CanvasSprite } from '../art/draw/CanvasSprite';
-import { drawAxeHead, drawHammer, drawPikeThrust, drawUniqueGlow } from '../art/draw/weaponDraw';
+import { drawAxeHead, drawGuardDog, drawHammer, drawPikeThrust, drawUniqueGlow } from '../art/draw/weaponDraw';
 
 type Proj = {
   x: number; y: number; vx: number; vy: number;
@@ -99,7 +99,8 @@ export class CombatSystem {
   private axeDrawnUnique = false;
   auraSprite: Phaser.GameObjects.Image | null = null;
   spikesSprite: Phaser.GameObjects.Image | null = null;
-  dogSprite: Phaser.GameObjects.Image | null = null;
+  dogCanvas: CanvasSprite | null = null;
+  private dogDrawKey = '';
   weaponTimers: Record<string, number> = {};
   /** Per-(source, target) hit cooldowns — legacy HIT_COOLDOWN uses game time, not frame ticks. */
   hitCdStatic = new Map<string, number>();
@@ -108,10 +109,22 @@ export class CombatSystem {
   hammers: FallingHammer[] = [];
   dynamites: DynamiteStick[] = [];
   pikes: PikeThrust[] = [];
-  dog: { x: number; y: number; life: number; cd: number; spawnCd: number } | null = null;
+  dog: {
+    x: number;
+    y: number;
+    life: number;
+    cd: number;
+    spawnCd: number;
+    walk: number;
+    facing: number;
+    flash: number;
+    trailAcc: number;
+  } | null = null;
   private _near: AnimalEntity[] = [];
   killCtx: KillContext = { isNight: false, dayNumber: 1, threatM: 0 };
   private metaBonuses: MetaBonuses = {} as MetaBonuses;
+  /** Mutator: scale resource/xp pickup amounts (not hearts/powerups). */
+  lootMult = 1;
   nuking = false;
   /**
    * While true, spawnPickup grants loot straight to the player (cataclysm vacuum).
@@ -178,8 +191,9 @@ export class CombatSystem {
     this.auraSprite = null;
     this.spikesSprite?.destroy();
     this.spikesSprite = null;
-    this.dogSprite?.destroy();
-    this.dogSprite = null;
+    this.dogCanvas?.destroy();
+    this.dogCanvas = null;
+    this.dogDrawKey = '';
     this.pools.length = 0;
     this.dog = null;
     this.weaponTimers = {};
@@ -192,7 +206,11 @@ export class CombatSystem {
    * otherwise spawn a new hop with outward velocity.
    */
   spawnPickup(kind: Pickup['kind'], x: number, y: number, amount: number, powerupId?: string) {
-    const value = Math.max(1, Math.round(amount));
+    const scaled =
+      kind === 'wood' || kind === 'meat' || kind === 'gold' || kind === 'xp'
+        ? amount * this.lootMult
+        : amount;
+    const value = Math.max(1, Math.round(scaled));
     // Cataclysm: pull loot straight into the bag — ground piles were getting culled by the
     // pickup cap when hundreds of beasts died in one frame.
     if (this.nukeAbsorb && kind !== 'powerup') {
@@ -702,38 +720,45 @@ export class CombatSystem {
     key: string,
   ) {
     const r = (stats.radius as number) * this.arsenal.passiveArea();
+    const unique = !!el && this.arsenal.isUnique(key);
+    // Elemental bake keys — distinct forms (not just a tint), matching card icons.
+    const texBase = key === 'spikes' ? 'spikes_ring' : 'aura_ring';
+    let tex = texBase;
+    if (el) {
+      const keyed = unique ? `${texBase}_${el}_u` : `${texBase}_${el}`;
+      if (this.scene.textures.exists(keyed)) tex = keyed;
+      else if (this.scene.textures.exists(`${texBase}_${el}`)) tex = `${texBase}_${el}`;
+    }
     let spr = key === 'spikes' ? this.spikesSprite : this.auraSprite;
     if (!spr) {
-      const tex = key === 'spikes' && this.scene.textures.exists('spikes_ring')
-        ? 'spikes_ring'
-        : 'aura_ring';
-      spr = this.scene.add.image(player.x, player.y, tex).setDepth(8).setAlpha(key === 'spikes' ? 0.9 : 0.55);
+      spr = this.scene.add.image(player.x, player.y, tex).setDepth(8);
       this.fxLayerSafeAdd(spr);
       if (key === 'spikes') this.spikesSprite = spr;
       else this.auraSprite = spr;
+    } else if (spr.texture.key !== tex && this.scene.textures.exists(tex)) {
+      spr.setTexture(tex);
     }
-    const baseSize = key === 'spikes' ? 128 : 64;
-    const scale = (r * 2) / baseSize;
-    const auraTint =
-      el === 'fire' ? 0xff8a4a
-        : el === 'water' ? 0x9ad4ff
-          : el === 'nature' ? 0x8fd98a
-            : el === 'earth' ? 0xd4b878
-              : el === 'light' ? 0xffe66d
-                : el === 'darkness' ? 0xb89ae8
-                  : 0xffb347;
+    const baseSize = key === 'spikes' ? 140 : 72;
+    const scale = ((r * 2) / baseSize) * (unique ? 1.06 : 1);
+    const st = this.arsenal.drawStyle(key);
     spr.setVisible(true)
       .setPosition(player.x, player.y)
       .setScale(scale)
       .setDepth(Math.floor(player.y) - 2)
-      .setTint(auraTint)
-      .setRotation((spr.rotation || 0) + dt * (key === 'spikes' ? 0.15 : 0.6));
-    if (el && Math.random() < dt * 10) {
+      .clearTint()
+      .setAlpha(key === 'spikes' ? (el ? 0.95 : 0.9) : el ? 0.72 : 0.55)
+      .setRotation((spr.rotation || 0) + dt * (key === 'spikes' ? (el ? 0.22 : 0.15) : el ? 0.75 : 0.6));
+    if (el && Math.random() < dt * (unique ? 14 : 10)) {
       const a = Math.random() * TAU;
       this.vfx?.trail(
         player.x + Math.cos(a) * r * 0.85,
         player.y + Math.sin(a) * r * 0.45 - 4,
-        { element: el, strength: 0.55, rich: false },
+        {
+          element: el,
+          color: st.trail || undefined,
+          strength: unique ? 0.75 : 0.55,
+          rich: unique,
+        },
       );
     }
 
@@ -1176,52 +1201,125 @@ export class CombatSystem {
 
   private updateDog(dt: number, player: RunPlayer, stats: Record<string, number>, el: ElementId | null, cdM: number) {
     if (!this.dog) {
-      this.dog = { x: player.x, y: player.y, life: stats.duration as number, cd: 0, spawnCd: stats.spawnCd as number };
+      this.dog = {
+        x: player.x,
+        y: player.y,
+        life: stats.duration as number,
+        cd: 0,
+        spawnCd: stats.spawnCd as number,
+        walk: 0,
+        facing: 1,
+        flash: 0,
+        trailAcc: 0,
+      };
     }
     this.dog.spawnCd -= dt;
+    if (this.dog.flash > 0) this.dog.flash = Math.max(0, this.dog.flash - dt);
     if (this.dog.spawnCd <= 0 && this.dog.life <= 0) {
       this.dog.life = stats.duration as number;
       this.dog.spawnCd = stats.spawnCd as number;
-      this.dog.x = player.x;
-      this.dog.y = player.y;
+      this.dog.x = player.x + rand(-24, 24);
+      this.dog.y = player.y + rand(-16, 16);
+      this.dog.flash = 0.22;
       Audio.playSfx('howl', 1.6);
     }
-    if (!this.dogSprite) {
-      this.dogSprite = this.scene.add.image(this.dog.x, this.dog.y, 'dog').setOrigin(0.5, 1).setDepth(this.dog.y);
-      this.layer.add(this.dogSprite);
+    if (!this.dogCanvas) {
+      const feetPad = 10;
+      // Extra room for elemental halo + unique scale outdoors.
+      this.dogCanvas = new CanvasSprite(
+        this.scene,
+        this.layer,
+        72,
+        52,
+        `rt_dog_${this.axeUid++}`,
+        0.5,
+        (52 - feetPad) / 52,
+      );
     }
     if (this.dog.life <= 0) {
-      this.dogSprite.setVisible(false);
+      this.dogCanvas.setVisible(false);
       return;
     }
     this.dog.life -= dt;
-    this.dogSprite.setVisible(true);
-    const target = this.animals.nearest(this.dog.x, this.dog.y, 280);
+    this.dogCanvas.setVisible(true);
+    // Never flash-wipe the style kit — flash is a draw overlay only, so infusion skins stay on.
+    const st = this.arsenal.drawStyle('guarddog', false);
+    const orbit = (stats.orbit as number) || 90;
+    const target = this.animals.nearest(this.dog.x, this.dog.y, orbit + 160);
+    let moving = false;
     if (target) {
       const dx = target.x - this.dog.x;
       const dy = target.y - this.dog.y;
       const d = Math.hypot(dx, dy) || 1;
-      const sp = stats.speed as number;
+      const sp = (stats.speed as number) * 1.15;
       this.dog.x += (dx / d) * sp * dt;
       this.dog.y += (dy / d) * sp * dt;
-      this.dogSprite.setFlipX(dx < 0);
-      if (d < target.radius + 14) {
+      if (Math.abs(dx) > 8) this.dog.facing = dx < 0 ? -1 : 1;
+      moving = d > 6;
+      if (d < target.radius + 18) {
         this.dog.cd -= dt;
         if (this.dog.cd <= 0) {
           this.dog.cd = (stats.biteCd as number) * cdM;
+          this.dog.flash = 0.12;
           this.damageAnimal(target, stats.dmg as number, player, el);
           Audio.playSfx('boarDie', 1.8);
+          if (el) {
+            this.vfx?.trail(this.dog.x, this.dog.y - 8, {
+              element: el,
+              color: st.trail || undefined,
+              strength: st.unique ? 0.9 : 0.55,
+              rich: !!st.unique,
+            });
+          }
         }
       }
     } else {
-      const dx = player.x - this.dog.x;
-      const dy = player.y - this.dog.y;
+      // Legacy orbit idle when nothing to hunt.
+      const a = this.scene.time.now / 1000 * 2.2;
+      const tx = player.x + Math.cos(a) * (orbit * 0.55);
+      const ty = player.y + Math.sin(a) * (orbit * 0.4);
+      const dx = tx - this.dog.x;
+      const dy = ty - this.dog.y;
       const d = Math.hypot(dx, dy) || 1;
-      this.dog.x += (dx / d) * 180 * dt;
-      this.dog.y += (dy / d) * 180 * dt;
-      this.dogSprite.setFlipX(dx < 0);
+      const sp = (stats.speed as number) * 0.75;
+      this.dog.x += (dx / d) * sp * dt;
+      this.dog.y += (dy / d) * sp * dt;
+      if (Math.abs(dx) > 8) this.dog.facing = dx < 0 ? -1 : 1;
+      moving = d > 4;
     }
-    this.dogSprite.setPosition(this.dog.x, this.dog.y).setDepth(this.dog.y);
+    if (moving) this.dog.walk += dt * (6 + (stats.speed as number) / 80);
+
+    const walkFrame = (this.dog.walk * 2) | 0;
+    const flashQ = this.dog.flash > 0 ? 1 : 0;
+    // Element + unique in the key so outdoor hunting redraws the infusion skin.
+    const key = `${this.dog.facing}|${walkFrame}|${flashQ}|${el || 'n'}|${st.unique ? 1 : 0}|${st.metal}`;
+    if (key !== this.dogDrawKey) {
+      this.dogDrawKey = key;
+      this.dogCanvas.clear();
+      this.dogCanvas.withFeetOrigin((ctx) => {
+        ctx.save();
+        const sc = st.unique ? 1.18 : el ? 1.1 : 1;
+        ctx.scale(this.dog!.facing * sc, st.unique ? 1.1 : el ? 1.06 : 1);
+        ctx.translate(0, -8);
+        drawGuardDog(ctx, st, { walk: this.dog!.walk, flash: this.dog!.flash > 0 });
+        ctx.restore();
+      }, 8);
+      this.dogCanvas.refresh();
+    }
+    this.dogCanvas.setPosition(this.dog.x, this.dog.y, this.dog.y);
+    // Soft elemental aura while hunting — skin matches HUD infusion.
+    if (el && st.trail && target && moving) {
+      this.dog.trailAcc += dt;
+      if (this.dog.trailAcc >= 0.05) {
+        this.dog.trailAcc = 0;
+        this.vfx?.trail(this.dog.x, this.dog.y - 6, {
+          element: el,
+          color: st.trail,
+          strength: st.unique ? 0.55 : 0.35,
+          rich: !!st.unique,
+        });
+      }
+    }
   }
 
   private spawnProjectile(

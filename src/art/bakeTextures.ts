@@ -13,6 +13,9 @@ import {
   drawTowerBaked,
   drawWallPostBaked,
 } from './draw/buildingBake';
+import { drawAuraRing, drawSpikesRing } from './draw/weaponDraw';
+import { ELEMENT_IDS, type ElementId } from '../data/constants';
+import { weaponDrawStyle } from '../data/weapons';
 
 const OUTLINE = '#2a1b12';
 
@@ -625,74 +628,61 @@ function bakeAxes(scene: Phaser.Scene) {
     ctx.stroke();
     register(scene, 'dynamite', el);
   }
-  // Guard dog
+  // Guard dog (fallback bake — runtime dogs use drawGuardDog with infusion skins)
   {
-    const [el, ctx] = canvas(40, 28);
-    const foot = 26;
-    drawShadow(ctx, 18, foot, 14, 4);
+    const [el, ctx] = canvas(56, 40);
+    drawShadow(ctx, 28, 34, 16, 5);
+    ctx.save();
+    ctx.translate(28, 30);
+    // Inline compact silhouette mirroring drawGuardDog neutrals.
+    ctx.fillStyle = '#c4a574';
     ctx.strokeStyle = OUTLINE;
-    ctx.lineWidth = 1.6;
-    ellipsePath(ctx, 16, 16, 12, 7);
-    ctx.fillStyle = '#c4a574';
+    ctx.lineWidth = 1.5;
+    ellipsePath(ctx, 0, 0, 12, 7.2);
     ctx.fill();
     ctx.stroke();
-    ellipsePath(ctx, 28, 12, 7, 6);
-    ctx.fillStyle = '#c4a574';
+    ellipsePath(ctx, 13, -3.2, 7, 5.8);
     ctx.fill();
     ctx.stroke();
+    ctx.fillStyle = '#8a6840';
+    ellipsePath(ctx, 18.5, -1.6, 4.2, 2.8);
+    ctx.fill();
     ctx.fillStyle = '#2a1b12';
-    ellipsePath(ctx, 31, 11, 1.2, 1.2);
+    ellipsePath(ctx, 15.2, -4.6, 1.45, 1.45);
     ctx.fill();
+    ctx.restore();
     register(scene, 'dog', el);
   }
-  // Aura ring helper (soft circle)
+  // Flame Ring — base + per-element forms (infusion skins).
   {
-    const [el, ctx] = canvas(64, 64);
-    const g = ctx.createRadialGradient(32, 32, 8, 32, 32, 30);
-    g.addColorStop(0, 'rgba(255,180,60,0)');
-    g.addColorStop(0.7, 'rgba(255,160,40,0.15)');
-    g.addColorStop(1, 'rgba(255,140,30,0.55)');
-    ctx.strokeStyle = 'rgba(255,180,80,0.7)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(32, 32, 28, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = g;
-    ctx.fill();
-    register(scene, 'aura_ring', el);
+    const bakeAura = (key: string, element: ElementId | null, unique = false) => {
+      const [el, ctx] = canvas(72, 72);
+      ctx.translate(36, 36);
+      const st = weaponDrawStyle(element, unique);
+      drawAuraRing(ctx, element, { unique, style: st });
+      register(scene, key, el);
+    };
+    bakeAura('aura_ring', null);
+    for (const id of ELEMENT_IDS) {
+      bakeAura(`aura_ring_${id}`, id as ElementId);
+      bakeAura(`aura_ring_${id}_u`, id as ElementId, true);
+    }
   }
 
-  // Spikes ring (legacy drawSpikes — wooden posts around a circle)
+  // Caltrop Ring — wooden base + elemental spike forms.
   {
-    const [el, ctx] = canvas(128, 128);
-    const cx = 64;
-    const cy = 64;
-    const r = 48;
-    const n = 14;
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      const x = cx + Math.cos(a) * r;
-      const y = cy + Math.sin(a) * r * 0.92;
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(a + Math.PI / 2);
-      roundRectPath(ctx, -3.5, -16, 7, 16, 1.5);
-      ctx.fillStyle = '#9a6232';
-      ctx.fill();
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = 1.3;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-3.5, -16);
-      ctx.lineTo(0, -24);
-      ctx.lineTo(3.5, -16);
-      ctx.closePath();
-      ctx.fillStyle = '#c08850';
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
+    const bakeSpikes = (key: string, element: ElementId | null, unique = false) => {
+      const [el, ctx] = canvas(140, 140);
+      ctx.translate(70, 70);
+      const st = weaponDrawStyle(element, unique);
+      drawSpikesRing(ctx, element, { unique, style: st });
+      register(scene, key, el);
+    };
+    bakeSpikes('spikes_ring', null);
+    for (const id of ELEMENT_IDS) {
+      bakeSpikes(`spikes_ring_${id}`, id as ElementId);
+      bakeSpikes(`spikes_ring_${id}_u`, id as ElementId, true);
     }
-    register(scene, 'spikes_ring', el);
   }
 }
 
@@ -741,26 +731,189 @@ function bakeTrees(scene: Phaser.Scene) {
   }
 }
 
+function bakePois(scene: Phaser.Scene) {
+  // Camp-scale landmarks (~cabin footprint). Feet at bottom; plenty of shadow pad.
+  // Den — cave mound with glowing eyes.
+  {
+    const [el, ctx] = canvas(148, 130);
+    ctx.translate(74, 112);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ellipsePath(ctx, 4, 4, 52, 18);
+    ctx.fill();
+    ctx.fillStyle = '#3a322c';
+    ctx.beginPath();
+    ctx.moveTo(-48, 0);
+    ctx.quadraticCurveTo(-54, -42, 0, -72);
+    ctx.quadraticCurveTo(54, -42, 48, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#2a221c';
+    ctx.beginPath();
+    ctx.moveTo(-36, 0);
+    ctx.quadraticCurveTo(-30, -28, 0, -38);
+    ctx.quadraticCurveTo(30, -28, 36, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#1a1410';
+    ellipsePath(ctx, 0, -18, 22, 14);
+    ctx.fill();
+    ctx.fillStyle = '#ff5a5f';
+    ellipsePath(ctx, -10, -24, 5.5, 4);
+    ctx.fill();
+    ellipsePath(ctx, 10, -24, 5.5, 4);
+    ctx.fill();
+    ctx.fillStyle = '#ffd0a0';
+    ellipsePath(ctx, -9, -25, 2, 1.5);
+    ctx.fill();
+    ellipsePath(ctx, 11, -25, 2, 1.5);
+    ctx.fill();
+    register(scene, 'poi_den', el);
+  }
+  // Wagon — supply cart.
+  {
+    const [el, ctx] = canvas(150, 120);
+    ctx.translate(75, 102);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ellipsePath(ctx, 0, 4, 54, 16);
+    ctx.fill();
+    ctx.fillStyle = '#8b5a2b';
+    ctx.fillRect(-42, -58, 84, 48);
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-42, -58, 84, 48);
+    ctx.fillStyle = '#a07038';
+    ctx.fillRect(-42, -58, 84, 10);
+    ctx.fillStyle = '#c9a227';
+    ctx.fillRect(-18, -46, 36, 22);
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-18, -46, 36, 22);
+    ctx.fillStyle = '#4a3a2a';
+    ellipsePath(ctx, -30, -4, 14, 14);
+    ctx.fill();
+    ellipsePath(ctx, 30, -4, 14, 14);
+    ctx.fill();
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(-30, -4, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(30, -4, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#c9a227';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-30, -4);
+    ctx.lineTo(-30, -18);
+    ctx.moveTo(30, -4);
+    ctx.lineTo(30, -18);
+    ctx.stroke();
+    register(scene, 'poi_wagon', el);
+  }
+  // Shrine — tall stone + glow.
+  {
+    const [el, ctx] = canvas(120, 150);
+    ctx.translate(60, 132);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ellipsePath(ctx, 0, 4, 40, 14);
+    ctx.fill();
+    ctx.fillStyle = '#7a848c';
+    ctx.beginPath();
+    ctx.moveTo(-24, 0);
+    ctx.lineTo(-30, -78);
+    ctx.lineTo(0, -108);
+    ctx.lineTo(30, -78);
+    ctx.lineTo(24, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#9aa4ac';
+    ctx.beginPath();
+    ctx.moveTo(-12, -40);
+    ctx.lineTo(0, -92);
+    ctx.lineTo(12, -40);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(168,230,255,0.9)';
+    ellipsePath(ctx, 0, -64, 14, 14);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(220,250,255,0.85)';
+    ellipsePath(ctx, 0, -64, 6, 6);
+    ctx.fill();
+    register(scene, 'poi_shrine', el);
+  }
+  // Vein — large ore mound.
+  {
+    const [el, ctx] = canvas(140, 110);
+    ctx.translate(70, 94);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ellipsePath(ctx, 4, 4, 48, 16);
+    ctx.fill();
+    ctx.fillStyle = '#5c646b';
+    ctx.beginPath();
+    ctx.moveTo(-42, 0);
+    ctx.lineTo(-30, -42);
+    ctx.lineTo(4, -58);
+    ctx.lineTo(40, -32);
+    ctx.lineTo(36, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#8b949b';
+    ctx.beginPath();
+    ctx.moveTo(-16, -20);
+    ctx.lineTo(0, -48);
+    ctx.lineTo(18, -18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#ffd54a';
+    for (const [ox, oy, s] of [[-12, -30, 10], [10, -42, 12], [0, -18, 9], [22, -24, 8]] as const) {
+      ctx.beginPath();
+      ctx.moveTo(ox, oy - s);
+      ctx.lineTo(ox + s * 0.75, oy);
+      ctx.lineTo(ox, oy + s * 0.7);
+      ctx.lineTo(ox - s * 0.75, oy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#9a6b00';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    register(scene, 'poi_vein', el);
+  }
+}
+
 function bakeProps(scene: Phaser.Scene) {
   // Several seeded variants — sprites pick by rock.variant / bush.variant.
+  // Shadow sits ~r*0.45 below the foot origin; keep room so bases aren't clipped.
   for (let i = 0; i < 6; i++) {
-    const [el, ctx] = canvas(56, 44);
-    ctx.translate(28, 40);
+    const [el, ctx] = canvas(64, 58);
+    ctx.translate(32, 44);
     drawRockBaked(ctx, false, 1, 1000 + i * 97);
     register(scene, i === 0 ? 'rock' : `rock_${i}`, el);
   }
   for (let i = 0; i < 6; i++) {
-    const [el, ctx] = canvas(56, 44);
-    ctx.translate(28, 40);
+    const [el, ctx] = canvas(64, 58);
+    ctx.translate(32, 44);
     drawRockBaked(ctx, true, 1.05, 2000 + i * 91);
     register(scene, i === 0 ? 'rock_ore' : `rock_ore_${i}`, el);
   }
   for (let i = 0; i < 5; i++) {
-    const [el, ctx] = canvas(48, 40);
-    ctx.translate(24, 36);
+    const [el, ctx] = canvas(52, 48);
+    ctx.translate(26, 40);
     drawBushBaked(ctx, 1, 3000 + i * 113);
     register(scene, i === 0 ? 'bush' : `bush_${i}`, el);
   }
+
+  bakePois(scene);
 
   const [fireEl, f] = canvas(52, 36);
   ellipsePath(f, 26, 30, 22, 10);

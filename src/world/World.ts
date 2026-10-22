@@ -1,5 +1,7 @@
 import { RNG, SpatialGrid, fbm, dist2, TAU, clamp } from '../core/math';
-import { WORLD_SIZE, WORLD_SEED, WORLD_MARGIN } from '../data/constants';
+import { WORLD_SIZE, WORLD_MARGIN, randomWorldSeed } from '../data/constants';
+import { POI_KINDS, type WorldPoi, type PoiKind } from '../data/pois';
+import { biomeFromDensity, type BiomeId } from '../data/biomes';
 
 export type TreeKind = 'oak' | 'pine';
 /** Legacy tree lifecycle: alive → falling → stump → growing → alive. */
@@ -126,11 +128,13 @@ export class World {
   trees: Tree[] = [];
   rocks: Rock[] = [];
   bushes: Bush[] = [];
+  pois: WorldPoi[] = [];
   staticGrid: SpatialGrid;
   bushGrid: SpatialGrid;
   private _q: StaticEntity[] = [];
+  private nextPoiId = 1;
 
-  constructor(seed = WORLD_SEED) {
+  constructor(seed = randomWorldSeed()) {
     this.seed = seed;
     this.w = WORLD_SIZE;
     this.h = WORLD_SIZE;
@@ -143,6 +147,17 @@ export class World {
 
   density(x: number, y: number) {
     return fbm(x / 650, y / 650, this.seed, 3);
+  }
+
+  /** Clearing / mixed woods / dense pine from the density field. */
+  biomeAt(x: number, y: number): BiomeId {
+    return biomeFromDensity(this.density(x, y));
+  }
+
+  /** Oak vs pine — denser bands lean pine. */
+  kindAt(x: number, y: number): TreeKind {
+    const pineBias = this.density(x, y) > 0.52 ? 0.12 : 0;
+    return fbm(x / 900, y / 900, this.seed + 7, 2) + pineBias > 0.55 ? 'pine' : 'oak';
   }
 
   nearStatic(x: number, y: number, minDist: number) {
@@ -303,8 +318,6 @@ export class World {
     const sy = this.spawnY;
     const W = this.w;
     const H = this.h;
-    const kindAt = (x: number, y: number) => (fbm(x / 900, y / 900, this.seed + 7, 2) > 0.55 ? 'pine' : 'oak');
-
     for (let row = 0; row < 2; row++) {
       const inset = row === 0 ? 30 : 78;
       const off = row * 32;
@@ -346,7 +359,7 @@ export class World {
         if (ds < 750) p *= 0.6;
         if (roll >= p) continue;
         if (this.nearStatic(x, y, 46)) continue;
-        this.addTree(x, y, rng, kindAt(x, y), 0.8 + sizeRoll * 0.55);
+        this.addTree(x, y, rng, this.kindAt(x, y), 0.8 + sizeRoll * 0.55);
       }
     }
 
@@ -391,6 +404,77 @@ export class World {
       this.bushes.push(b);
       this.bushGrid.insert(b);
     }
+
+    this.placePois(rng, sx, sy, W, H);
+  }
+
+  /**
+   * Dawn reshuffle — clear landmarks and place a fresh random set.
+   * Seeded by world seed + day so Continue restores the same layout.
+   */
+  reshufflePois(dayNumber: number) {
+    const day = Math.max(1, dayNumber | 0);
+    const rng = new RNG((this.seed ^ Math.imul(day, 2654435761)) >>> 0 || 1);
+    this.pois.length = 0;
+    this.placePois(rng, this.spawnX, this.spawnY, this.w, this.h);
+  }
+
+  /** Restore landmark layout from a mid-run checkpoint. */
+  loadPois(list: { id: number; kind: string; x: number; y: number; used: boolean }[]) {
+    this.pois = list.map((p) => ({
+      id: p.id,
+      kind: (POI_KINDS as readonly string[]).includes(p.kind) ? (p.kind as PoiKind) : 'wagon',
+      x: p.x,
+      y: p.y,
+      used: !!p.used,
+    }));
+    this.nextPoiId = list.reduce((m, p) => Math.max(m, p.id), 0) + 1;
+  }
+
+  /** Seed ~8–12 one-shot landmarks outside the camp ring. */
+  private placePois(rng: RNG, sx: number, sy: number, W: number, H: number) {
+    const target = 8 + rng.int(0, 4);
+    const minCamp = 620;
+    // Camp-scale landmarks need more clearance from each other / trees.
+    const minPoi = 340;
+    let placed = 0;
+    for (let attempt = 0; attempt < 160 && placed < target; attempt++) {
+      const x = rng.range(200, W - 200);
+      const y = rng.range(200, H - 200);
+      if (Math.hypot(x - sx, y - sy) < minCamp) continue;
+      if (this.nearStatic(x, y, 90)) continue;
+      let nearPoi = false;
+      for (const p of this.pois) {
+        if (dist2(x, y, p.x, p.y) < minPoi * minPoi) {
+          nearPoi = true;
+          break;
+        }
+      }
+      if (nearPoi) continue;
+      const kind = POI_KINDS[rng.int(0, POI_KINDS.length - 1)] as PoiKind;
+      this.pois.push({
+        id: this.nextPoiId++,
+        kind,
+        x,
+        y,
+        used: false,
+      });
+      placed++;
+    }
+  }
+
+  nearestPoi(x: number, y: number, maxR: number): WorldPoi | null {
+    let best: WorldPoi | null = null;
+    let bestD = maxR * maxR;
+    for (const p of this.pois) {
+      if (p.used) continue;
+      const d2 = dist2(x, y, p.x, p.y);
+      if (d2 < bestD) {
+        bestD = d2;
+        best = p;
+      }
+    }
+    return best;
   }
 
   isFree(x: number, y: number, r: number) {

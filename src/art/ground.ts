@@ -24,8 +24,17 @@ export function grassColor(
 ) {
   const n = fbm(x / 420, y / 420, seed + 3, 2);
   let c = mixRgb(GRASS_DARK, GRASS_LIGHT, clamp(n * 1.3 - 0.15 + (jitter - 0.5) * 0.2, 0, 1));
+  // Same density field as World.density — clearing / woods / dense pine bands.
   const d = fbm(x / 650, y / 650, seed, 3);
-  if (d > 0.5) c = mixRgb(c, FOREST_FLOOR, clamp((d - 0.5) * 3, 0, 0.55));
+  if (d < 0.42) {
+    c = mixRgb(c, CLEARING, clamp((0.42 - d) * 2.2, 0, 0.55));
+  } else if (d > 0.55) {
+    const pine = hexToRgb('#2f5a28');
+    c = mixRgb(c, FOREST_FLOOR, clamp((d - 0.5) * 2.4, 0, 0.65));
+    c = mixRgb(c, pine, clamp((d - 0.55) * 2.8, 0, 0.45));
+  } else if (d > 0.5) {
+    c = mixRgb(c, FOREST_FLOOR, clamp((d - 0.5) * 3, 0, 0.4));
+  }
   const ds = Math.max(Math.abs(x - spawnX), Math.abs(y - spawnY));
   if (ds < 440) c = mixRgb(c, CLEARING, clamp((440 - ds) / 220, 0, 0.5));
   return rgbStr(c);
