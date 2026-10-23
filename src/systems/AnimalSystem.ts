@@ -97,6 +97,8 @@ export interface AnimalEntity {
   burns: { dps: number; life: number }[];
   slow: number;
   slowT: number;
+  /** Flash bomb etc. — freezes movement and attacks while > 0. */
+  stunT: number;
   dead: boolean;
   hitCd: number;
   wanderAngle: number;
@@ -424,6 +426,7 @@ export class AnimalSystem {
       burns: [],
       slow: 0,
       slowT: 0,
+      stunT: 0,
       dead: false,
       hitCd: 0,
       wanderAngle: rand(0, TAU),
@@ -1415,8 +1418,21 @@ export class AnimalSystem {
         a.slowT -= dt;
         if (a.slowT <= 0) a.slow = 0;
       }
-      const moveMult = 1 - clamp(a.slow, 0, 0.7);
+      if (a.stunT > 0) a.stunT = Math.max(0, a.stunT - dt);
+      const stunned = a.stunT > 0;
+      const moveMult = stunned ? 0 : 1 - clamp(a.slow, 0, 0.7);
       const sp = SPECIES[a.species];
+
+      // Stunned: freeze in place (no AI / attacks / abilities this frame).
+      if (stunned && !a.leaving) {
+        a.vx = 0;
+        a.vy = 0;
+        a.moving = false;
+        a.flash = Math.max(a.flash, 0.05);
+        this.redrawAnimal(a);
+        a.canvas?.setPosition(a.x, a.y, a.y);
+        continue;
+      }
 
       // Leaving after dawn — flee map edge then despawn.
       if (a.leaving) {

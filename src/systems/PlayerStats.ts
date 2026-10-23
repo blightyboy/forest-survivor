@@ -23,15 +23,17 @@ export function recomputePlayerStats(player: RunPlayer, arsenal: ArsenalSystem, 
   const gear = gearBonuses(player.equipment);
   const lv = (k: string) => arsenal.passives[k] || 0;
 
-  // Legacy computePlayerStats maxHp: base pool then greed/devil % cut.
+  // Base pool, then greed/devil % cut and angel % boost.
   const baseHp =
     100 +
     25 * lv('vitality') +
-    30 * lv('angel') +
     10 * Math.max(0, player.level - 1) +
     (gear.maxHp || 0) +
     (meta.maxHp || 0);
-  const hpMult = Math.max(0.25, 1 - 0.08 * lv('greed') - 0.1 * lv('devil'));
+  const hpMult = Math.max(
+    0.25,
+    1 - 0.08 * lv('greed') - 0.1 * lv('devil') + 0.12 * lv('angel'),
+  );
   const newMax = Math.max(40, Math.round(baseHp * hpMult));
   arsenal.baseMaxHp = newMax;
 

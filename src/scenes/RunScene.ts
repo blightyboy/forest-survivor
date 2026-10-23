@@ -51,6 +51,8 @@ import {
   type WinGoalId,
 } from '../data/winGoals';
 import type { AchievementId } from '../data/achievements';
+import { WEAPON_DEFS } from '../data/weapons';
+import { PASSIVE_DEFS } from '../data/passives';
 import {
   clearRunSnapshot,
   loadRunSnapshot,
@@ -294,6 +296,7 @@ export class RunScene extends Phaser.Scene {
       burnAcc: 0,
       burnT: 0,
     };
+    this.arsenal.achievements = [...meta.achievements];
     this.arsenal.addWeapon('axe', 1);
     this.arsenal.applyMetaRunStart(this.player, bonuses);
     recomputePlayerStats(this.player, this.arsenal, bonuses);
@@ -668,7 +671,18 @@ export class RunScene extends Phaser.Scene {
   private tryUnlockAchievement(id: AchievementId) {
     const got = meta.unlockAchievement(id);
     if (!got) return;
-    this.ui.banner(`Achievement: ${got.name}`, `+${got.credits} credits`, '#ffe08a');
+    this.arsenal.achievements = [...meta.achievements];
+    const unlockBits: string[] = [];
+    for (const wid of got.unlockWeapons) {
+      unlockBits.push(WEAPON_DEFS[wid]?.name || wid);
+    }
+    for (const pid of got.unlockPassives) {
+      unlockBits.push(PASSIVE_DEFS[pid]?.name || pid);
+    }
+    const sub = unlockBits.length
+      ? `+${got.credits} credits · Unlocked: ${unlockBits.join(', ')}`
+      : `+${got.credits} credits`;
+    this.ui.banner(`Achievement: ${got.name}`, sub, '#ffe08a');
   }
 
   private checkRaidAchievements() {
@@ -1201,6 +1215,7 @@ export class RunScene extends Phaser.Scene {
   /**
    * Screen shake (legacy addShake / trauma).
    * Options shakeScale: 0% = off; amplitude scales linearly so 5% vs 100% is obvious.
+   * Base amp is halved vs the old curve so 100% feels moderate.
    */
   shake(intensity = 0.25) {
     const scale = Number.isFinite(settings.shakeScale) ? settings.shakeScale : 1;
@@ -1209,7 +1224,7 @@ export class RunScene extends Phaser.Scene {
     if (amount <= 0.001) return;
     // Duration from event strength; amplitude fully gated by the option %.
     const duration = 140 + amount * 240;
-    const amp = (0.0025 + amount * 0.018) * scale;
+    const amp = (0.0025 + amount * 0.018) * 0.5 * scale;
     this.cameras.main.shake(duration, amp);
   }
 
@@ -2209,6 +2224,7 @@ export class RunScene extends Phaser.Scene {
     this.arsenal.passives = { ...snap.arsenal.passives };
     this.arsenal.usedElements = { ...snap.arsenal.usedElements };
     this.arsenal.banished = new Set(snap.arsenal.banished);
+    this.arsenal.achievements = [...meta.achievements];
     this.camp.levels = { ...this.camp.levels, ...snap.camp.levels };
     this.camp.recompute();
     this.camp.hp = snap.camp.hp;

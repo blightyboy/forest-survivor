@@ -1,5 +1,6 @@
 import { ELEMENT_IDS, MAX_WEAPONS, WEAPON_MAX, type ElementId } from './constants.ts';
 import { WEAPON_DEFS } from './weapons.ts';
+import { isPassiveUnlocked, isWeaponUnlocked } from './achievements.ts';
 
 export interface PassiveDef {
   name: string;
@@ -21,7 +22,7 @@ export const PASSIVE_DEFS: Record<string, PassiveDef> = {
   dash: { name: 'Second Wind', desc: '+1 dash charge', max: 3 },
   greed: { name: 'Greed', desc: '-8% max HP, +18% resource & XP drops', max: 5 },
   devil: { name: "Devil's Contract", desc: '-10% max HP, +12% damage', max: 5 },
-  angel: { name: "Angel's Blessing", desc: '-8% damage, +30 max HP', max: 5 },
+  angel: { name: "Angel's Blessing", desc: '-8% damage, +12% max HP', max: 5 },
   ember: { name: 'Ember Mastery', desc: '+36% Fire damage (only if you deal Fire)', max: 3 },
   tide: { name: 'Tide Mastery', desc: '+36% Water damage (only if you deal Water)', max: 3 },
   bloom: { name: 'Bloom Mastery', desc: '+36% Nature damage (only if you deal Nature)', max: 3 },
@@ -62,9 +63,19 @@ export interface ArsenalCardState {
   usedElements: Record<string, boolean>;
 }
 
+export type UnlockFilter = {
+  /** Meta achievement ids — gates new weapons / risk passives. */
+  achievements?: readonly string[];
+};
+
 /** Build the weighted pool of level-up card offers (mirrors Arsenal.cardOptions). */
-export function buildLevelUpCardPool(state: ArsenalCardState, banished: Set<string> | null = null): LevelUpCard[] {
+export function buildLevelUpCardPool(
+  state: ArsenalCardState,
+  banished: Set<string> | null = null,
+  unlocks: UnlockFilter | null = null,
+): LevelUpCard[] {
   const banned = banished || new Set<string>();
+  const ach = unlocks?.achievements || [];
   const pool: LevelUpCard[] = [];
   const push = (card: LevelUpCard) => {
     if (!banned.has(cardKey(card))) pool.push(card);
@@ -74,8 +85,13 @@ export function buildLevelUpCardPool(state: ArsenalCardState, banished: Set<stri
 
   for (const id in WEAPON_DEFS) {
     const l = weaponLevel(id);
-    if (l === 0 && state.weaponOrder.length < MAX_WEAPONS) push({ kind: 'weapon', id, level: 1, w: 1.15 });
-    else if (l > 0 && l < WEAPON_MAX) push({ kind: 'weapon', id, level: l + 1, w: 1.3 });
+    // Already owned: always allow upgrades. New picks need unlock.
+    if (l === 0) {
+      if (!isWeaponUnlocked(id, ach)) continue;
+      if (state.weaponOrder.length < MAX_WEAPONS) push({ kind: 'weapon', id, level: 1, w: 1.15 });
+    } else if (l > 0 && l < WEAPON_MAX) {
+      push({ kind: 'weapon', id, level: l + 1, w: 1.3 });
+    }
   }
 
   for (const id of state.weaponOrder) {
@@ -89,6 +105,8 @@ export function buildLevelUpCardPool(state: ArsenalCardState, banished: Set<stri
   for (const id in PASSIVE_DEFS) {
     const l = state.passives[id] || 0;
     if (l >= PASSIVE_DEFS[id].max) continue;
+    // Already stacked: allow further ranks. New picks need unlock.
+    if (l === 0 && !isPassiveUnlocked(id, ach)) continue;
     const needEl = ELEMENT_PASSIVES[id];
     if (needEl && !used[needEl]) continue;
     push({ kind: 'passive', id, level: l + 1, w: 0.85 });
@@ -129,6 +147,7 @@ export function levelUpCardOptions(
   n: number,
   state: ArsenalCardState,
   banished: Set<string> | null = null,
+  unlocks: UnlockFilter | null = null,
 ): LevelUpCard[] {
-  return rollLevelUpCards(n, buildLevelUpCardPool(state, banished), banished);
+  return rollLevelUpCards(n, buildLevelUpCardPool(state, banished, unlocks), banished);
 }

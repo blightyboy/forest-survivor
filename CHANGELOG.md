@@ -2,6 +2,28 @@
 
 All notable changes to Forest Survivor are documented here.
 
+## 0.2.5-alpha-build
+
+### Achievements & unlocks
+- Achievement credit rewards ×10 (80–700)
+- Achievements unlock weapons/cards in the level-up pool (existing saves keep earned unlocks)
+- Win goals unlock Greed / Devil's Contract / Angel's Blessing; Fully Armed unlocks Extra Hands
+- Glossary shows locked weapons/passives and unlock lines on achievements
+- Angel's Blessing: +12% max HP per stack (was +30 flat)
+
+### New achievement weapons (6; each with 6 elemental unique forms)
+- **Chain & Hook** — orbiting hooks (First Blood)
+- **Snare Trap** — ground snares until stepped on (Trail Scout)
+- **Fishing Pole** — reel beasts toward you; more targets per level (Forest Chronicler)
+- **Lightning in a Bottle** — chain lightning jumps (Boss Hunter)
+- **Flash Bomb** — AoE stun, tiny damage (Night Watch)
+- **Poison Bottle** — green ooze pools that DoT beasts (Siege Breaker)
+
+### Glossary & polish
+- Glossary icons for variants, elements, boss moves, species (in-game animal art), power-ups, world, achievements
+- Assault/raid species pills no longer inherit banner text-shadow (doubled labels)
+- Screen shake amplitude halved (0–100% option unchanged)
+
 ## 0.2.4-alpha-build
 
 ### Landmarks & world

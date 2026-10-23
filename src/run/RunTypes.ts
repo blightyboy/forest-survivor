@@ -126,6 +126,10 @@ export interface FirePool {
   dmg: number;
   life: number;
   dead: boolean;
+  /** burn hurts player; poison / enemyOnly only hurts beasts. */
+  kind?: 'burn' | 'poison';
+  /** Hex tint for ground VFX (poison ooze, etc.). */
+  color?: string;
 }
 
 export type RunCallbacks = {

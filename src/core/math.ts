@@ -1,5 +1,5 @@
 export const TAU = Math.PI * 2;
-export const BUILD_VERSION = '0.2.4-alpha-build';
+export const BUILD_VERSION = '0.2.5-alpha-build';
 
 export function clamp(v: number, min: number, max: number) {
   return v < min ? min : v > max ? max : v;

@@ -68,7 +68,7 @@ type PikeThrust = {
   _trailAcc?: number;
 };
 
-/** Legacy Dynamite — lobbed in an arc, explodes on landing for AoE. */
+/** Lobbed stick / flask — dynamite blast, flash stun, or poison pool on land. */
 type DynamiteStick = {
   x0: number;
   y0: number;
@@ -86,6 +86,31 @@ type DynamiteStick = {
   dead: boolean;
   gfx: Phaser.GameObjects.Image;
   shadow: Phaser.GameObjects.Ellipse;
+  kind: 'dynamite' | 'flashbomb' | 'poisonflask';
+  stun?: number;
+  poolLife?: number;
+};
+
+/** Ground snare — persists until a beast steps on it. */
+type ArmedTrap = {
+  x: number;
+  y: number;
+  r: number;
+  dmg: number;
+  element: ElementId | null;
+  dead: boolean;
+  gfx: Phaser.GameObjects.Image;
+};
+
+/** Short-lived lightning arc between chain jumps. */
+type LightningArc = {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  life: number;
+  color: number;
+  gfx: Phaser.GameObjects.Graphics;
 };
 
 export class CombatSystem {
@@ -97,6 +122,9 @@ export class CombatSystem {
   private axeUid = 0;
   /** Last unique flag baked into orbiting axe canvases. */
   private axeDrawnUnique = false;
+  chainAngle = 0;
+  chainSprites: Phaser.GameObjects.Image[] = [];
+  private chainTrailGfx: Phaser.GameObjects.Graphics | null = null;
   auraSprite: Phaser.GameObjects.Image | null = null;
   spikesSprite: Phaser.GameObjects.Image | null = null;
   dogCanvas: CanvasSprite | null = null;
@@ -108,6 +136,9 @@ export class CombatSystem {
   projectiles: Proj[] = [];
   hammers: FallingHammer[] = [];
   dynamites: DynamiteStick[] = [];
+  traps: ArmedTrap[] = [];
+  lightningArcs: LightningArc[] = [];
+  private poolGfx: Phaser.GameObjects.Graphics | null = null;
   pikes: PikeThrust[] = [];
   dog: {
     x: number;
@@ -182,11 +213,21 @@ export class CombatSystem {
       d.shadow.destroy();
     }
     this.dynamites.length = 0;
+    for (const t of this.traps) t.gfx.destroy();
+    this.traps.length = 0;
+    for (const arc of this.lightningArcs) arc.gfx.destroy();
+    this.lightningArcs.length = 0;
     for (const pk of this.pikes) pk.canvas.destroy();
     this.pikes.length = 0;
     for (const a of this.axeCanvas) a.destroy();
     this.axeCanvas.length = 0;
     this.axeSprites.length = 0;
+    for (const s of this.chainSprites) s.destroy();
+    this.chainSprites.length = 0;
+    this.chainTrailGfx?.destroy();
+    this.chainTrailGfx = null;
+    this.poolGfx?.destroy();
+    this.poolGfx = null;
     this.auraSprite?.destroy();
     this.auraSprite = null;
     this.spikesSprite?.destroy();
@@ -552,11 +593,18 @@ export class CombatSystem {
     if (!hasAura && this.auraSprite) this.auraSprite.setVisible(false);
     if (!hasSpikes && this.spikesSprite) this.spikesSprite.setVisible(false);
 
+    const hasChain = this.arsenal.weaponOrder.includes('chainhook' as WeaponId);
+    if (!hasChain) {
+      for (const s of this.chainSprites) s.setVisible(false);
+      this.chainTrailGfx?.clear();
+    }
+
     for (const id of this.arsenal.weaponOrder) {
       const stats = this.arsenal.getWeaponStats(id);
       if (!stats) continue;
       const el = this.arsenal.weaponElements[id] || null;
       if (id === 'axe') this.updateAxe(dt, player, stats, el, areaM);
+      else if (id === 'chainhook') this.updateChainhook(dt, player, stats, el, areaM);
       else if (id === 'aura') this.updateAura(dt, player, stats, el, cdM, 'aura');
       else if (id === 'spikes') this.updateAura(dt, player, stats, el, cdM, 'spikes');
       else if (id === 'hatchet') this.updateShooter(dt, player, stats, el, id, cdM);
@@ -566,6 +614,11 @@ export class CombatSystem {
       else if (id === 'pike') this.updatePike(dt, player, stats, el, cdM);
       else if (id === 'saw') this.updateSaw(dt, player, stats, el, cdM);
       else if (id === 'dynamite') this.updateDynamite(dt, player, stats, el, cdM);
+      else if (id === 'flashbomb') this.updateLobbed(dt, player, stats, el, cdM, 'flashbomb');
+      else if (id === 'poisonflask') this.updateLobbed(dt, player, stats, el, cdM, 'poisonflask');
+      else if (id === 'trap') this.updateTrap(dt, player, stats, el, cdM);
+      else if (id === 'stormflask') this.updateStormflask(dt, player, stats, el, cdM);
+      else if (id === 'fishingpole') this.updateFishingpole(dt, player, stats, el, cdM);
       else if (id === 'hammerfall') this.updateHammer(dt, player, stats, el, cdM);
       else if (id === 'guarddog') this.updateDog(dt, player, stats, el, cdM);
     }
@@ -574,6 +627,8 @@ export class CombatSystem {
     this.updatePikes(dt, player);
     this.updateHammers(dt, player);
     this.updateDynamiteFlight(dt, player);
+    this.updateTraps(player);
+    this.updateLightningArcs(dt);
     this.updatePickups(dt, player);
     this.updatePools(dt, player);
   }
@@ -1032,9 +1087,73 @@ export class CombatSystem {
         dead: false,
         gfx,
         shadow,
+        kind: 'dynamite',
       });
     }
     Audio.playSfx('throw', 0.55);
+  }
+
+  /** Flash bomb / poison flask — same lob arc as dynamite, different landing. */
+  private updateLobbed(
+    dt: number,
+    player: RunPlayer,
+    stats: Record<string, number>,
+    el: ElementId | null,
+    cdM: number,
+    kind: 'flashbomb' | 'poisonflask',
+  ) {
+    if (!this.weaponReady(kind, dt)) return;
+    const count = this.projCount(stats);
+    const pool: AnimalEntity[] = [];
+    for (const a of this.animals.animals) {
+      if (a.dead) continue;
+      if (dist2(player.x, player.y, a.x, a.y) <= 460 * 460) pool.push(a);
+    }
+    if (!pool.length) {
+      this.armWeapon(kind, false, 0, cdM);
+      return;
+    }
+    this.armWeapon(kind, true, stats.cd as number, cdM);
+    const radius = (stats.radius as number) * this.arsenal.passiveArea();
+    const tex = this.scene.textures.exists(kind) ? kind : 'dynamite';
+    for (let i = 0; i < count; i++) {
+      const t = pool[Math.floor(Math.random() * pool.length)];
+      const scatter = rand(-24, 24);
+      const tx = t.x + t.vx * 0.45 + scatter;
+      const ty = t.y + t.vy * 0.45 + scatter;
+      const x0 = player.x;
+      const y0 = player.y;
+      const dur = clamp(Math.hypot(tx - x0, ty - y0) / 520, 0.35, 0.8);
+      const gfx = this.scene.add.image(x0, y0 - 20, tex).setDepth(16).setScale(1.1);
+      if (el && ELEMENTS[el]) {
+        gfx.setTint(Phaser.Display.Color.HexStringToColor(ELEMENTS[el].color).color);
+      }
+      const shadow = this.scene.add.ellipse(x0, y0 + 1, 14, 6, 0x000000, 0.2).setDepth(Math.floor(y0) - 1);
+      this.fx.add(gfx);
+      this.fx.add(shadow);
+      this.dynamites.push({
+        x0,
+        y0,
+        tx,
+        ty,
+        x: x0,
+        y: y0,
+        z: 20,
+        t: 0,
+        dur,
+        spin: 0,
+        dmg: stats.dmg as number,
+        radius,
+        element: el,
+        dead: false,
+        gfx,
+        shadow,
+        kind,
+        stun: stats.stun as number | undefined,
+        poolLife: stats.life as number | undefined,
+      });
+    }
+    Audio.playSfx('throw', 0.5);
   }
 
   /** Legacy Dynamite.update — lerp ground path + sin arc height, then explode. */
@@ -1053,9 +1172,17 @@ export class CombatSystem {
         .setDepth(Math.floor(d.y) + 20);
       d.shadow.setPosition(d.x, d.y + 1).setDepth(Math.floor(d.y) - 1).setAlpha(0.22 * (1 - k * 0.3));
       if (Math.random() < dt * 18) {
+        const trailCol =
+          d.kind === 'poisonflask'
+            ? '#6dd46a'
+            : d.kind === 'flashbomb'
+              ? '#ffe66d'
+              : d.element
+                ? ELEMENTS[d.element]?.color
+                : '#ffb347';
         this.vfx?.trail(d.x, d.y - 12 - d.z, {
           element: d.element,
-          color: d.element ? ELEMENTS[d.element]?.color : '#ffb347',
+          color: trailCol,
           strength: d.element ? 0.9 : 0.55,
           rich: !!d.element,
           vy: -40,
@@ -1063,7 +1190,9 @@ export class CombatSystem {
       }
       if (k >= 1) {
         d.dead = true;
-        this.explodeDynamite(d.x, d.y, d.radius, d.dmg, player, d.element);
+        if (d.kind === 'flashbomb') this.explodeFlash(d, player);
+        else if (d.kind === 'poisonflask') this.explodePoison(d, player);
+        else this.explodeDynamite(d.x, d.y, d.radius, d.dmg, player, d.element);
       }
     }
     compactInPlace(this.dynamites, (d) => {
@@ -1089,6 +1218,303 @@ export class CombatSystem {
     this.fxSys()?.explosion(x, y, r);
     this.onShake?.(0.48);
     Audio.playSfx('boom', 0.85);
+  }
+
+  private explodeFlash(d: DynamiteStick, player: RunPlayer) {
+    const stun = d.stun || 1.4;
+    this.animals.queryNear(d.x, d.y, d.radius, this._near);
+    for (const a of this._near) {
+      if (a.dead) continue;
+      a.stunT = Math.max(a.stunT, stun);
+      if (d.dmg > 0) this.damageAnimal(a, d.dmg, player, d.element);
+    }
+    this.fxSys()?.explosion(d.x, d.y, d.radius * 0.55);
+    this.vfx?.sparks(d.x, d.y - 8, 14, '#ffe66d');
+    this.onShake?.(0.18);
+    Audio.playSfx('boom', 0.45);
+  }
+
+  private explodePoison(d: DynamiteStick, _player: RunPlayer) {
+    this.pools.push({
+      x: d.x,
+      y: d.y,
+      r: d.radius,
+      dmg: d.dmg,
+      life: d.poolLife || 5,
+      dead: false,
+      kind: 'poison',
+      color: d.element ? ELEMENTS[d.element]?.color || '#6dd46a' : '#6dd46a',
+    });
+    this.vfx?.sparks(d.x, d.y - 4, 8, '#6dd46a');
+    Audio.playSfx('hit', 0.5);
+  }
+
+  private updateChainhook(
+    dt: number,
+    player: RunPlayer,
+    stats: Record<string, number>,
+    el: ElementId | null,
+    areaM: number,
+  ) {
+    const speed = (stats.speed as number) * this.spinMult(player);
+    this.chainAngle += speed * dt;
+    const count = this.projCount(stats);
+    const range = (stats.range as number) * areaM;
+    const dmg = stats.dmg as number;
+    const st = this.arsenal.drawStyle('chainhook');
+    const tex = this.scene.textures.exists('chainhook') ? 'chainhook' : 'hatchet';
+
+    while (this.chainSprites.length < count) {
+      const spr = this.scene.add.image(0, 0, tex).setDepth(12).setScale(st.unique ? 1.15 : 1);
+      this.fxLayerSafeAdd(spr);
+      this.chainSprites.push(spr);
+    }
+    while (this.chainSprites.length > count) {
+      this.chainSprites.pop()?.destroy();
+    }
+
+    if (!this.chainTrailGfx) {
+      this.chainTrailGfx = this.scene.add.graphics().setDepth(6);
+      this.fxLayerSafeAdd(this.chainTrailGfx);
+    }
+    const tg = this.chainTrailGfx;
+    tg.clear();
+    if (player.alive && count > 0) {
+      const accent = st.accent
+        ? Phaser.Display.Color.HexStringToColor(st.accent).color
+        : 0xc3ced6;
+      tg.lineStyle(2, accent, el ? 0.28 : 0.14);
+      tg.strokeEllipse(player.x, player.y, range * 2, range * 2);
+    }
+
+    for (let i = 0; i < count; i++) {
+      const ang = this.chainAngle + (i / count) * TAU;
+      const ax = player.x + Math.cos(ang) * range;
+      const ay = player.y + Math.sin(ang) * range - 10;
+      const spr = this.chainSprites[i];
+      spr
+        .setVisible(true)
+        .setPosition(ax, ay)
+        .setRotation(ang + Math.PI / 2)
+        .setDepth(Math.floor(ay) + 4)
+        .clearTint()
+        .setScale(st.unique ? 1.15 : 1);
+      if (el && st.metal) {
+        spr.setTint(Phaser.Display.Color.HexStringToColor(st.metal).color);
+      }
+      if (el && Math.random() < dt * 10) {
+        this.vfx?.trail(ax, ay, {
+          element: el,
+          color: st.trail || undefined,
+          strength: 0.7,
+          rich: st.unique,
+        });
+      }
+      // Chain link toward player.
+      if (this.chainTrailGfx) {
+        const linkCol = st.metal
+          ? Phaser.Display.Color.HexStringToColor(st.metal).color
+          : 0x8a9096;
+        this.chainTrailGfx.lineStyle(1.6, linkCol, 0.45);
+        this.chainTrailGfx.lineBetween(player.x, player.y - 8, ax, ay);
+      }
+      this.hitArea(ax, ay + 10, 15 * areaM, dmg, player, el, true, `chain${i}`);
+    }
+  }
+
+  private updateTrap(
+    dt: number,
+    player: RunPlayer,
+    stats: Record<string, number>,
+    el: ElementId | null,
+    cdM: number,
+  ) {
+    if (!this.weaponReady('trap', dt)) return;
+    const maxArmed = (stats.maxArmed as number) || 6;
+    const live = this.traps.filter((t) => !t.dead).length;
+    if (live >= maxArmed) {
+      this.armWeapon('trap', false, 0, cdM);
+      return;
+    }
+    this.armWeapon('trap', true, stats.cd as number, cdM);
+    const count = Math.min(this.projCount(stats), maxArmed - live);
+    const radius = (stats.radius as number) * this.arsenal.passiveArea();
+    const tex = this.scene.textures.exists('trap') ? 'trap' : 'spikes';
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * TAU;
+      const dist = rand(48, 140);
+      const x = player.x + Math.cos(ang) * dist;
+      const y = player.y + Math.sin(ang) * dist;
+      const gfx = this.scene.add.image(x, y, tex).setDepth(Math.floor(y) - 1).setScale(1.05);
+      if (el && ELEMENTS[el]) {
+        gfx.setTint(Phaser.Display.Color.HexStringToColor(ELEMENTS[el].color).color);
+      }
+      this.fxLayerSafeAdd(gfx);
+      this.traps.push({
+        x,
+        y,
+        r: radius,
+        dmg: stats.dmg as number,
+        element: el,
+        dead: false,
+        gfx,
+      });
+    }
+    Audio.playSfx('hit', 0.35);
+  }
+
+  private updateTraps(player: RunPlayer) {
+    for (const t of this.traps) {
+      if (t.dead) continue;
+      t.gfx.setPosition(t.x, t.y).setDepth(Math.floor(t.y) - 1);
+      for (const a of this.animals.animals) {
+        if (a.dead) continue;
+        if (dist2(t.x, t.y, a.x, a.y) > (t.r + a.radius * 0.4) ** 2) continue;
+        t.dead = true;
+        this.damageAnimal(a, t.dmg, player, t.element);
+        this.vfx?.sparks(t.x, t.y - 6, 8, t.element ? ELEMENTS[t.element]?.color : '#c3ced6');
+        this.onShake?.(0.12);
+        Audio.playSfx('hit', 0.7);
+        break;
+      }
+    }
+    compactInPlace(this.traps, (t) => {
+      if (t.dead) t.gfx.destroy();
+      return t.dead;
+    });
+  }
+
+  private updateStormflask(
+    dt: number,
+    player: RunPlayer,
+    stats: Record<string, number>,
+    el: ElementId | null,
+    cdM: number,
+  ) {
+    if (!this.weaponReady('stormflask', dt)) return;
+    const range = stats.range as number;
+    let first: AnimalEntity | null = null;
+    let best = range * range;
+    for (const a of this.animals.animals) {
+      if (a.dead) continue;
+      const d = dist2(player.x, player.y, a.x, a.y);
+      if (d < best) {
+        best = d;
+        first = a;
+      }
+    }
+    if (!first) {
+      this.armWeapon('stormflask', false, 0, cdM);
+      return;
+    }
+    this.armWeapon('stormflask', true, stats.cd as number, cdM);
+    const jumps = Math.max(1, Math.round(stats.jumps as number));
+    const jumpR = (stats.jumpRange as number) || 160;
+    const dmg = stats.dmg as number;
+    const hit = new Set<number>();
+    let cur: AnimalEntity | null = first;
+    let prevX = player.x;
+    let prevY = player.y - 20;
+    const col = el && ELEMENTS[el]
+      ? Phaser.Display.Color.HexStringToColor(ELEMENTS[el].color).color
+      : 0x7fd3ff;
+    for (let i = 0; i < jumps && cur; i++) {
+      hit.add(cur.uid);
+      this.spawnLightningArc(prevX, prevY, cur.x, cur.y - cur.radius, col);
+      this.damageAnimal(cur, dmg * (1 - i * 0.06), player, el);
+      prevX = cur.x;
+      prevY = cur.y - cur.radius;
+      let next: AnimalEntity | null = null;
+      let nextBest = jumpR * jumpR;
+      for (const a of this.animals.animals) {
+        if (a.dead || hit.has(a.uid)) continue;
+        const d = dist2(cur.x, cur.y, a.x, a.y);
+        if (d < nextBest) {
+          nextBest = d;
+          next = a;
+        }
+      }
+      cur = next;
+    }
+    Audio.playSfx('hit', 0.85);
+  }
+
+  private spawnLightningArc(x0: number, y0: number, x1: number, y1: number, color: number) {
+    const gfx = this.scene.add.graphics().setDepth(40);
+    this.fxLayerSafeAdd(gfx);
+    gfx.lineStyle(2.4, color, 0.95);
+    gfx.beginPath();
+    gfx.moveTo(x0, y0);
+    const mids = 3;
+    for (let i = 1; i <= mids; i++) {
+      const t = i / (mids + 1);
+      const x = lerp(x0, x1, t) + rand(-10, 10);
+      const y = lerp(y0, y1, t) + rand(-8, 8);
+      gfx.lineTo(x, y);
+    }
+    gfx.lineTo(x1, y1);
+    gfx.strokePath();
+    gfx.lineStyle(1, 0xffffff, 0.55);
+    gfx.strokePath();
+    this.lightningArcs.push({ x0, y0, x1, y1, life: 0.18, color, gfx });
+  }
+
+  private updateLightningArcs(dt: number) {
+    for (const arc of this.lightningArcs) {
+      arc.life -= dt;
+      arc.gfx.setAlpha(clamp(arc.life / 0.18, 0, 1));
+    }
+    compactInPlace(this.lightningArcs, (a) => {
+      if (a.life <= 0) a.gfx.destroy();
+      return a.life <= 0;
+    });
+  }
+
+  private updateFishingpole(
+    dt: number,
+    player: RunPlayer,
+    stats: Record<string, number>,
+    el: ElementId | null,
+    cdM: number,
+  ) {
+    if (!this.weaponReady('fishingpole', dt)) return;
+    const range = stats.range as number;
+    const count = this.projCount(stats);
+    const pull = stats.pull as number;
+    const dmg = stats.dmg as number;
+    const candidates: { a: AnimalEntity; d: number }[] = [];
+    for (const a of this.animals.animals) {
+      if (a.dead) continue;
+      const d = dist2(player.x, player.y, a.x, a.y);
+      if (d <= range * range) candidates.push({ a, d });
+    }
+    if (!candidates.length) {
+      this.armWeapon('fishingpole', false, 0, cdM);
+      return;
+    }
+    this.armWeapon('fishingpole', true, stats.cd as number, cdM);
+    candidates.sort((a, b) => a.d - b.d);
+    const col = el && ELEMENTS[el]
+      ? Phaser.Display.Color.HexStringToColor(ELEMENTS[el].color).color
+      : 0xc3ced6;
+    for (let i = 0; i < Math.min(count, candidates.length); i++) {
+      const a = candidates[i].a;
+      const dx = player.x - a.x;
+      const dy = player.y - a.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      // Reel toward player — bosses resist a bit.
+      const resist = a.boss || a.trueBoss ? 0.45 : a.big ? 0.7 : 1;
+      const step = Math.min(dist - 28, pull * 0.085 * resist);
+      if (step > 0) {
+        a.x += (dx / dist) * step;
+        a.y += (dy / dist) * step;
+        a.vx *= 0.3;
+        a.vy *= 0.3;
+      }
+      this.spawnLightningArc(player.x, player.y - 18, a.x, a.y - a.radius * 0.5, col);
+      this.damageAnimal(a, dmg, player, el);
+    }
+    Audio.playSfx('hit', 0.55);
   }
 
   private updateHammer(dt: number, player: RunPlayer, stats: Record<string, number>, el: ElementId | null, cdM: number) {
@@ -1683,18 +2109,41 @@ export class CombatSystem {
   private updatePools(dt: number, player: RunPlayer) {
     let inPool = false;
     let poolDmg = 0;
+    if (!this.poolGfx) {
+      this.poolGfx = this.scene.add.graphics().setDepth(5);
+      this.fxLayerSafeAdd(this.poolGfx);
+    }
+    const pg = this.poolGfx;
+    pg.clear();
     for (const pool of this.pools) {
       if (pool.dead) continue;
       pool.life -= dt;
       if (pool.life <= 0) pool.dead = true;
-      if (dist2(pool.x, pool.y, player.x, player.y) < pool.r * pool.r) {
+      const isPoison = pool.kind === 'poison';
+      const hex = pool.color || (isPoison ? '#6dd46a' : '#ff6a3d');
+      const col = Phaser.Display.Color.HexStringToColor(hex).color;
+      const pulse = 0.55 + 0.2 * Math.sin(pool.life * 6);
+      pg.fillStyle(col, isPoison ? 0.28 * pulse : 0.22 * pulse);
+      pg.fillEllipse(pool.x, pool.y, pool.r * 2, pool.r * 1.35);
+      pg.lineStyle(2, col, isPoison ? 0.45 : 0.35);
+      pg.strokeEllipse(pool.x, pool.y, pool.r * 2, pool.r * 1.35);
+
+      if (!isPoison && dist2(pool.x, pool.y, player.x, player.y) < pool.r * pool.r) {
         inPool = true;
         poolDmg += pool.dmg * dt;
       }
       for (const a of this.animals.animals) {
         if (a.dead) continue;
         if (dist2(pool.x, pool.y, a.x, a.y) < pool.r * pool.r) {
-          this.animals.damageAnimal(a, pool.dmg * dt * 0.5, player, this.pickups, this.pools, this.killCtx);
+          const mul = isPoison ? 0.65 : 0.5;
+          this.animals.damageAnimal(
+            a,
+            pool.dmg * dt * mul,
+            player,
+            this.pickups,
+            this.pools,
+            this.killCtx,
+          );
         }
       }
     }

@@ -28,6 +28,7 @@ import { META_UPGRADES, meta as metaProgress, type MetaProgress, type MetaUpgrad
 import { settings, type DisplayMode } from '../meta/Settings';
 import { Audio } from '../audio/Audio';
 import { ICONS, icon, weaponIcon } from './icons';
+import { animalIconHtml } from './animalIcons';
 import type { RunPlayer } from '../run/RunTypes';
 import type { CampSystem } from '../systems/CampSystem';
 import type { DayNightSystem } from '../systems/DayNightSystem';
@@ -41,7 +42,14 @@ import {
 import { COACH_STEPS } from '../data/tutorials';
 import { MUTATORS, MUTATOR_BY_ID, mutatorLabelList, type MutatorId } from '../data/mutators';
 import { WIN_GOALS, WIN_GOAL_BY_ID, type WinGoalId } from '../data/winGoals';
-import { ACHIEVEMENTS, type AchievementId } from '../data/achievements';
+import {
+  ACHIEVEMENTS,
+  achievementUnlockingPassive,
+  achievementUnlockingWeapon,
+  isPassiveUnlocked,
+  isWeaponUnlocked,
+  type AchievementId,
+} from '../data/achievements';
 import { hasActiveRun } from '../meta/RunSave';
 import type { UpdateInfo } from '../types/global';
 
@@ -1277,9 +1285,10 @@ export class DomUI {
                   : 'projectiles'
           }.`
         : 'Melee beast of the forest.';
+    const ico = animalIconHtml(id) || this.glossarySwatch(sp.color);
     return `
       <div class="fs-glossary-card">
-        <div class="fs-glossary-icon">${this.glossarySwatch(sp.color)}</div>
+        <div class="fs-glossary-icon">${ico}</div>
         <div class="fs-glossary-body">
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${sp.name}</span>
@@ -1294,12 +1303,29 @@ export class DomUI {
   private glossaryWeaponCard(id: string) {
     const def = WEAPON_DEFS[id];
     if (!def) return '';
+    const unlocked = isWeaponUnlocked(id, this.menuMetaRef.achievements);
+    const gate = achievementUnlockingWeapon(id);
+    if (!unlocked && gate) {
+      return `
+      <div class="fs-glossary-card locked">
+        <div class="fs-glossary-icon">${this.glossarySwatch('#3a3228')}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">???</span>
+            <span class="fs-glossary-tag">Locked</span>
+          </div>
+          <div class="fs-glossary-desc">Earn <b>${gate.name}</b> to unlock this weapon in the level-up pool.</div>
+        </div>
+      </div>`;
+    }
     const s1 = def.stats(1);
     const sm = def.stats(WEAPON_MAX);
     const fmt = (s: Record<string, number>) => {
       const bits: string[] = [];
       if (s.dmg != null) bits.push(`dmg ${s.dmg}`);
       if (s.count != null) bits.push(`×${s.count}`);
+      if (s.jumps != null) bits.push(`jumps ${s.jumps}`);
+      if (s.stun != null) bits.push(`stun ${s.stun.toFixed(1)}s`);
       if (s.radius != null) bits.push(`r ${Math.round(s.radius)}`);
       if (s.size != null) bits.push(`size ${Math.round(s.size)}`);
       if (s.range != null) bits.push(`rng ${Math.round(s.range)}`);
@@ -1323,6 +1349,7 @@ export class DomUI {
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${def.name}</span>
             <span class="fs-glossary-tag">Max ${WEAPON_MAX}</span>
+            ${gate ? `<span class="fs-glossary-tag">Achievement</span>` : ''}
           </div>
           <div class="fs-glossary-desc">${def.text[0] || ''} At max level + infusion, awakens into a unique elemental form.</div>
           ${uniques ? `<div class="fs-glossary-unique-row">${uniques}</div>` : ''}
@@ -1337,6 +1364,21 @@ export class DomUI {
   private glossaryPassiveCard(id: string) {
     const def = PASSIVE_DEFS[id];
     if (!def) return '';
+    const unlocked = isPassiveUnlocked(id, this.menuMetaRef.achievements);
+    const gate = achievementUnlockingPassive(id);
+    if (!unlocked && gate) {
+      return `
+      <div class="fs-glossary-card locked">
+        <div class="fs-glossary-icon">${this.glossarySwatch('#3a3228')}</div>
+        <div class="fs-glossary-body">
+          <div class="fs-glossary-title">
+            <span class="fs-glossary-name">???</span>
+            <span class="fs-glossary-tag">Locked</span>
+          </div>
+          <div class="fs-glossary-desc">Earn <b>${gate.name}</b> to unlock this card in the level-up pool.</div>
+        </div>
+      </div>`;
+    }
     const el = ELEMENT_PASSIVES[id];
     const elTag = el ? el.charAt(0).toUpperCase() + el.slice(1) : '';
     return `
@@ -1347,6 +1389,7 @@ export class DomUI {
             <span class="fs-glossary-name">${def.name}</span>
             <span class="fs-glossary-tag">Max ${def.max}</span>
             ${elTag ? `<span class="fs-glossary-tag">${elTag}</span>` : ''}
+            ${gate ? `<span class="fs-glossary-tag">Achievement</span>` : ''}
           </div>
           <div class="fs-glossary-desc">${def.desc}</div>
         </div>
@@ -1374,7 +1417,7 @@ export class DomUI {
     if (!def) return '';
     return `
       <div class="fs-glossary-card">
-        <div class="fs-glossary-icon">${this.glossarySwatch(def.color)}</div>
+        <div class="fs-glossary-icon">${this.glossaryIcon(id, 'magnet')}</div>
         <div class="fs-glossary-body">
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${def.name}</span>
@@ -1433,9 +1476,13 @@ export class DomUI {
           : id === 'demonic'
             ? 'Crimson spiked look. On death, leaves a large fire pool that burns you.'
             : 'Standard forest wildlife — baseline stats.';
+    // Same wolf body + in-game variant rim/spikes so the card matches combat art.
+    const ico =
+      animalIconHtml('wolf', id) ||
+      this.glossaryIcon(`variant_${id}`, 'variant_basic');
     return `
       <div class="fs-glossary-card">
-        <div class="fs-glossary-icon">${this.glossarySwatch(v.bar || '#8a7a60')}</div>
+        <div class="fs-glossary-icon">${ico}</div>
         <div class="fs-glossary-body">
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${v.name}</span>
@@ -1474,7 +1521,7 @@ export class DomUI {
       .join('');
     return `
       <div class="fs-glossary-card">
-        <div class="fs-glossary-icon">${this.glossarySwatch(def.color)}</div>
+        <div class="fs-glossary-icon">${this.glossaryIcon(ELEMENT_ICON[el] || el, el)}</div>
         <div class="fs-glossary-body">
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${def.name}</span>
@@ -1510,10 +1557,9 @@ export class DomUI {
         </div>
       </div>`;
     }
-    const ico = icon(id) || this.glossarySwatch(def.color);
     return `
       <div class="fs-glossary-card">
-        <div class="fs-glossary-icon">${ico}</div>
+        <div class="fs-glossary-icon">${this.glossaryIcon(id)}</div>
         <div class="fs-glossary-body">
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${def.name}</span>
@@ -1532,15 +1578,29 @@ export class DomUI {
     const def = ACHIEVEMENTS.find((a) => a.id === id);
     if (!def) return '';
     const earned = this.menuMetaRef.hasAchievement(id);
+    const ico = earned
+      ? this.glossaryIcon(id, 'luck')
+      : this.glossarySwatch('#3a3228');
+    const unlockBits: string[] = [];
+    for (const wid of def.unlockWeapons || []) {
+      unlockBits.push(WEAPON_DEFS[wid]?.name || wid);
+    }
+    for (const pid of def.unlockPassives || []) {
+      unlockBits.push(PASSIVE_DEFS[pid]?.name || pid);
+    }
+    const unlockLine = unlockBits.length
+      ? `<div class="fs-glossary-stats">${this.glossaryStat('Unlocks', unlockBits.join(', '))}</div>`
+      : '';
     return `
       <div class="fs-glossary-card${earned ? '' : ' locked'}">
-        <div class="fs-glossary-icon">${this.glossarySwatch(earned ? '#ffe08a' : '#3a3228')}</div>
+        <div class="fs-glossary-icon">${ico}</div>
         <div class="fs-glossary-body">
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${earned ? def.name : '???'}</span>
             <span class="fs-glossary-tag">${earned ? `+${def.credits} credits` : 'Locked'}</span>
           </div>
           <div class="fs-glossary-desc">${earned ? def.desc : 'Keep exploring to unlock this achievement.'}</div>
+          ${earned ? unlockLine : ''}
         </div>
       </div>`;
   }
@@ -1567,11 +1627,15 @@ export class DomUI {
     tag: string;
     desc: string;
     color?: string;
+    icon?: string;
     stats?: string;
   }) {
+    const ico = opts.icon
+      ? this.glossaryIcon(opts.icon)
+      : this.glossarySwatch(opts.color || '#8a7a60');
     return `
       <div class="fs-glossary-card">
-        <div class="fs-glossary-icon">${this.glossarySwatch(opts.color || '#8a7a60')}</div>
+        <div class="fs-glossary-icon">${ico}</div>
         <div class="fs-glossary-body">
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${opts.name}</span>
@@ -1669,92 +1733,92 @@ export class DomUI {
         this.glossarySimpleCard({
           name: 'Opening grace',
           tag: `${START_GRACE}s`,
-          color: '#9ef08a',
+          icon: 'world_grace',
           desc: `At run start, wildlife ignores you and the camp for ${START_GRACE}s unless you strike first (provoked beasts fight back). Daytime assault waves and boss spawns are held until grace ends.`,
           stats: this.glossaryStat('Duration', `${START_GRACE}s`),
         }),
         this.glossarySimpleCard({
           name: 'Day / night cycle',
           tag: 'Time',
-          color: '#ffe08a',
+          icon: 'world_daynight',
           desc: 'Days stretch into dusk, then night. At dusk, raid fronts gather — get back to camp. Night brings raiders; dawn repairs the cabin and palisades if you survive.',
         }),
         this.glossarySimpleCard({
           name: 'Night raids',
           tag: 'Siege',
-          color: '#ff6b6b',
+          icon: 'world_raids',
           desc: 'Raiders march from the forest edge toward camp. Most nights a miniboss leads; every 3rd night a true boss arrives with signature moves. Survive until dawn for wood and gold.',
         }),
         this.glossarySimpleCard({
           name: 'Daytime assaults',
           tag: 'Wave',
-          color: '#ff9a6b',
+          icon: 'world_assaults',
           desc: 'After grace, daytime assault waves periodically march on the camp. Held during night raids. Threat scales wave size and difficulty.',
         }),
         this.glossarySimpleCard({
           name: 'Day champions',
           tag: 'Boss',
-          color: '#c4a35a',
+          icon: 'world_champions',
           desc: 'Killing wildlife can awaken a daytime champion of that species — a tough day-boss that marches on the camp. Chance rises with stars, species, and day number. Disabled during grace.',
         }),
         this.glossarySimpleCard({
           name: 'Rising threat',
           tag: 'Scaling',
-          color: '#ffd23f',
+          icon: 'world_threat',
           desc: 'Threat climbs with run time. Beasts gain HP, damage, speed, and higher veterancy. Push farther for richer loot, or hug camp when nights get ugly.',
         }),
         this.glossarySimpleCard({
           name: 'Resources',
           tag: 'Gather',
-          color: '#ffd9a0',
+          icon: 'world_resources',
           desc: 'Wood from trees, meat from beasts, gold from ore veins and lucky kills. Spend them at camp to fortify, produce, and gear up at the blacksmith.',
         }),
         this.glossarySimpleCard({
           name: 'Landmarks (POIs)',
           tag: 'Explore',
-          color: '#a8e6ff',
+          icon: 'world_poi',
           desc: 'Dens, supply wagons, shrines, and rich veins spawn across the forest. Press E nearby to interact once — dens spawn elites, wagons drop supplies, shrines bless you, veins burst into gold chunks. Each morning the forest shifts: landmarks move and change.',
         }),
         this.glossarySimpleCard({
           name: 'Run mutators',
           tag: 'Challenge',
-          color: '#ff7a5c',
+          icon: 'world_mutators',
           desc: 'Toggle challenges on the main menu before a run: Savage (threat up, more credits), No Grace, Glass cannon, Siege assaults, or Scarcity loot. Stack freely; choices are saved.',
         }),
         this.glossarySimpleCard({
           name: 'Win goals',
           tag: 'Milestone',
-          color: '#ffe08a',
+          icon: 'world_win',
           desc: 'Optional finish line: Easy 6 nights, Medium 12, Hard 18. Survive the final gauntlet night for a badge and bonus credits. Endless skips the goal.',
         }),
         this.glossarySimpleCard({
           name: 'Codex & achievements',
           tag: 'Meta',
-          color: '#a8e6ff',
-          desc: 'First kills unlock species in the Glossary beasts tab for a small credit reward. True-boss moves unlock when you face them. Achievements grant permanent credits — check the Achievements glossary tab.',
+          icon: 'world_codex',
+          desc: 'First kills unlock species in the Glossary beasts tab for a small credit reward. True-boss moves unlock when you face them. Achievements grant credits and unlock new weapons/cards — check the Achievements glossary tab.',
         }),
         this.glossarySimpleCard({
           name: 'Biomes',
           tag: 'World',
-          color: '#6dd46a',
+          icon: 'world_biomes',
           desc: 'Density bands create clearings, mixed woods, and dense pine. Wildlife spawn tables tilt by biome — predators favor pine, deer and sheep prefer clearings.',
         }),
         this.glossarySimpleCard({
           name: 'Checkpoints',
           tag: 'Save',
-          color: '#7fd3ff',
+          icon: 'world_checkpoints',
           desc: 'The run autosaves at dusk, dawn, pause, and periodically. Continue from the main menu to resume seed, day clock, camp, gear, and landmarks.',
         }),
         this.glossarySimpleCard({
           name: 'Status effects',
           tag: 'Combat',
-          color: '#6dd46a',
+          icon: 'world_status',
           desc: 'Poison stacks DoT from nature attacks. Slow from gloom, vines, water spray, and similar. Burn pools (demonic deaths, fire trails, scorch) deal damage over time while you stand in them.',
         }),
         this.glossarySimpleCard({
           name: 'Coach tutorials',
           tag: 'Tips',
-          color: '#7fd3ff',
+          icon: 'world_coach',
           desc: 'While Tutorials are On in Options, coach tips spotlight HUD and world targets each run. After a run you can turn them off. Toggle anytime in Options.',
         }),
       ];

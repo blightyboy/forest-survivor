@@ -156,6 +156,77 @@ export const WEAPON_DEFS: Record<string, WeaponDef> = {
       speed: 260 + at(l, 2, 30) + at(l, 5, 40),
     }),
   },
+  chainhook: {
+    name: 'Chain & Hook',
+    text: ['Iron hooks whirl on chains around you', '+1 hook', '+10 damage, wider orbit', 'Spin 25% faster', '+1 hook',
+      '+16 damage, wider orbit', '+12 damage, spin 20% faster', '+1 hook, +18 damage'],
+    stats: (l) => ({
+      count: 1 + at(l, 2, 1) + at(l, 5, 1) + at(l, 8, 1),
+      dmg: 18 + at(l, 3, 10) + at(l, 6, 16) + at(l, 7, 12) + at(l, 8, 18),
+      range: 64 + at(l, 3, 16) + at(l, 6, 18) + at(l, 8, 14),
+      speed: 5.2 * (l >= 4 ? 1.25 : 1) * (l >= 7 ? 1.2 : 1),
+    }),
+  },
+  trap: {
+    name: 'Snare Trap',
+    text: ['Places a snare that snaps when a beast steps on it', '+1 trap', '+18 damage', 'Wider trigger', 'Arms 20% faster',
+      '+1 trap', '+28 damage', 'Huge snare, +22 damage'],
+    stats: (l) => ({
+      count: 1 + at(l, 2, 1) + at(l, 6, 1),
+      dmg: 48 + at(l, 3, 18) + at(l, 7, 28) + at(l, 8, 22),
+      radius: 28 + at(l, 4, 10) + at(l, 8, 12),
+      cd: l >= 5 ? 1.6 : 2.1,
+      maxArmed: 4 + at(l, 2, 2) + at(l, 6, 2) + at(l, 8, 2),
+    }),
+  },
+  flashbomb: {
+    name: 'Flash Bomb',
+    text: ['Lobs a flash that stuns beasts — barely scrapes them', 'Wider flash', 'Stun lasts longer', '+1 bomb', 'Thrown 20% faster',
+      'Wider flash', 'Longer stun', 'Huge flash, longer stun'],
+    stats: (l) => ({
+      count: 1 + at(l, 4, 1),
+      dmg: 4 + at(l, 8, 2),
+      radius: 90 + at(l, 2, 18) + at(l, 6, 22) + at(l, 8, 24),
+      stun: 1.4 + at(l, 3, 0.4) + at(l, 5, 0.35) + at(l, 7, 0.45) + at(l, 8, 0.4),
+      cd: l >= 5 ? 2.4 : 3.0,
+    }),
+  },
+  stormflask: {
+    name: 'Lightning in a Bottle',
+    text: ['Uncorks chain lightning that leaps between beasts', '+1 jump', '+12 damage', '+1 jump', 'Fires 20% faster',
+      '+1 jump', '+20 damage', '+1 jump, +16 damage'],
+    stats: (l) => ({
+      jumps: 3 + at(l, 2, 1) + at(l, 4, 1) + at(l, 6, 1) + at(l, 8, 1),
+      dmg: 28 + at(l, 3, 12) + at(l, 7, 20) + at(l, 8, 16),
+      range: 220 + at(l, 5, 40) + at(l, 8, 30),
+      jumpRange: 160 + at(l, 4, 30) + at(l, 8, 25),
+      cd: l >= 5 ? 1.35 : 1.75,
+    }),
+  },
+  fishingpole: {
+    name: 'Fishing Pole',
+    text: ['Hooks a beast and reels it toward you', '+1 target', 'Stronger pull', '+1 target', 'Casts 20% faster',
+      '+1 target', 'Stronger pull', '+1 target, fierce reel'],
+    stats: (l) => ({
+      count: 1 + at(l, 2, 1) + at(l, 4, 1) + at(l, 6, 1) + at(l, 8, 1),
+      dmg: 14 + at(l, 3, 8) + at(l, 7, 12),
+      pull: 420 + at(l, 3, 80) + at(l, 7, 100) + at(l, 8, 80),
+      range: 280 + at(l, 5, 40) + at(l, 8, 30),
+      cd: l >= 5 ? 1.15 : 1.5,
+    }),
+  },
+  poisonflask: {
+    name: 'Poison Bottle',
+    text: ['Throws a vial that shatters into a green ooze pool', '+14 pool DPS', 'Wider pool', '+1 vial', 'Thrown 20% faster',
+      'Longer ooze', '+18 pool DPS', 'Huge pool, +16 DPS'],
+    stats: (l) => ({
+      count: 1 + at(l, 4, 1),
+      dmg: 22 + at(l, 2, 14) + at(l, 7, 18) + at(l, 8, 16),
+      radius: 52 + at(l, 3, 14) + at(l, 8, 18),
+      life: 5 + at(l, 6, 2.5) + at(l, 8, 1.5),
+      cd: l >= 5 ? 2.0 : 2.55,
+    }),
+  },
 };
 
 export type WeaponId = keyof typeof WEAPON_DEFS;
@@ -209,6 +280,30 @@ export const UNIQUE_NAMES: Record<string, Partial<Record<ElementId, string>>> = 
   guarddog: {
     fire: 'Hellhound', water: 'Tide Hound', nature: 'Mosswolf',
     earth: 'Stonefang', light: 'Lightfang', darkness: 'Shade Hound',
+  },
+  chainhook: {
+    fire: 'Searing Flail', water: 'Anchor Flail', nature: 'Briar Flail',
+    earth: 'Chainbola', light: 'Halo Flail', darkness: 'Soul Flail',
+  },
+  trap: {
+    fire: 'Cinder Snare', water: 'Frost Snare', nature: 'Root Snare',
+    earth: 'Quake Snare', light: 'Solar Snare', darkness: 'Void Snare',
+  },
+  flashbomb: {
+    fire: 'Solar Flare', water: 'Tide Flash', nature: 'Pollen Burst',
+    earth: 'Dust Flash', light: 'Nova Flash', darkness: 'Blackout Bomb',
+  },
+  stormflask: {
+    fire: 'Plasma Flask', water: 'Stormglass', nature: 'Thorn Arc',
+    earth: 'Fault Spark', light: 'Astral Arc', darkness: 'Void Arc',
+  },
+  fishingpole: {
+    fire: 'Magma Gaff', water: 'Tide Gaff', nature: 'Vine Gaff',
+    earth: 'Stone Gaff', light: 'Lumen Gaff', darkness: 'Shade Gaff',
+  },
+  poisonflask: {
+    fire: 'Acid Flask', water: 'Brine Flask', nature: 'Venom Flask',
+    earth: 'Mire Flask', light: 'Radiant Toxin', darkness: 'Blight Flask',
   },
 };
 
@@ -307,8 +402,12 @@ export function applyUniqueMults(s: WeaponStats | null | undefined, weaponId: st
   const out: WeaponStats = { ...s };
   if (out.dmg != null) out.dmg = Math.round(out.dmg * UNIQUE_STAT_MULT.dmg);
   if (out.range != null) out.range = Math.round(out.range * UNIQUE_STAT_MULT.range);
-  if (out.speed != null && weaponId !== 'axe') out.speed = Math.round(out.speed * UNIQUE_STAT_MULT.speed);
-  if (out.speed != null && weaponId === 'axe') out.speed *= UNIQUE_STAT_MULT.speed;
+  if (out.speed != null && weaponId !== 'axe' && weaponId !== 'chainhook') {
+    out.speed = Math.round(out.speed * UNIQUE_STAT_MULT.speed);
+  }
+  if (out.speed != null && (weaponId === 'axe' || weaponId === 'chainhook')) {
+    out.speed *= UNIQUE_STAT_MULT.speed;
+  }
   if (out.cd != null) out.cd *= UNIQUE_STAT_MULT.cd;
   if (out.size != null) out.size *= UNIQUE_STAT_MULT.size;
   if (out.radius != null) out.radius = Math.round(out.radius * UNIQUE_STAT_MULT.radius);
@@ -317,9 +416,24 @@ export function applyUniqueMults(s: WeaponStats | null | undefined, weaponId: st
   if (out.orbit != null) out.orbit = Math.round(out.orbit * UNIQUE_STAT_MULT.area);
   if (out.cone != null) out.cone *= 1.15;
   if (out.pierce != null) out.pierce += 1;
-  if (out.count != null && (weaponId === 'hatchet' || weaponId === 'knife' || weaponId === 'crossbow')) {
+  if (
+    out.count != null &&
+    (weaponId === 'hatchet' ||
+      weaponId === 'knife' ||
+      weaponId === 'crossbow' ||
+      weaponId === 'trap' ||
+      weaponId === 'flashbomb' ||
+      weaponId === 'poisonflask' ||
+      weaponId === 'fishingpole')
+  ) {
     out.count += 1;
   }
+  if (out.jumps != null) out.jumps += 1;
+  if (out.jumpRange != null) out.jumpRange = Math.round(out.jumpRange * UNIQUE_STAT_MULT.range);
+  if (out.stun != null) out.stun *= 1.2;
+  if (out.pull != null) out.pull = Math.round(out.pull * 1.15);
+  if (out.life != null) out.life *= 1.2;
+  if (out.maxArmed != null) out.maxArmed += 2;
   if (out.biteCd != null) out.biteCd *= 0.85;
   if (out.tick != null) out.tick *= 0.85;
   return out;

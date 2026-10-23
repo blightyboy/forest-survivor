@@ -333,14 +333,24 @@ export class MetaProgress {
     return { credits };
   }
 
-  /** Unlock an achievement if new; grants its credit reward. */
-  unlockAchievement(id: AchievementId): { credits: number; name: string } | null {
+  /** Unlock an achievement if new; grants its credit reward (+ optional card unlocks). */
+  unlockAchievement(id: AchievementId): {
+    credits: number;
+    name: string;
+    unlockWeapons: string[];
+    unlockPassives: string[];
+  } | null {
     const def = ACHIEVEMENT_BY_ID[id];
     if (!def || this.hasAchievement(id)) return null;
     this.achievements.push(id);
     const credits = this.grantCredits(def.credits);
     this.save();
-    return { credits, name: def.name };
+    return {
+      credits,
+      name: def.name,
+      unlockWeapons: [...(def.unlockWeapons || [])],
+      unlockPassives: [...(def.unlockPassives || [])],
+    };
   }
 
   save() {

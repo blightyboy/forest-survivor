@@ -628,6 +628,119 @@ function bakeAxes(scene: Phaser.Scene) {
     ctx.stroke();
     register(scene, 'dynamite', el);
   }
+  // Achievement weapons — compact projectiles / orbit tokens.
+  {
+    const [el, ctx] = canvas(28, 28);
+    ctx.strokeStyle = '#8a9096';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.arc(10, 14, 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(15, 14);
+    ctx.lineTo(22, 14);
+    ctx.stroke();
+    ctx.fillStyle = '#c3ced6';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(20, 10);
+    ctx.lineTo(26, 14);
+    ctx.lineTo(20, 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    register(scene, 'chainhook', el);
+  }
+  {
+    const [el, ctx] = canvas(28, 20);
+    ctx.fillStyle = '#5a4028';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.4;
+    ellipsePath(ctx, 14, 14, 11, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = '#c3ced6';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(6, 12);
+    ctx.lineTo(10, 4);
+    ctx.lineTo(18, 4);
+    ctx.lineTo(22, 12);
+    ctx.stroke();
+    register(scene, 'trap', el);
+  }
+  {
+    const [el, ctx] = canvas(20, 20);
+    ctx.fillStyle = '#ffe66d';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.4;
+    ellipsePath(ctx, 10, 11, 7, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ellipsePath(ctx, 10, 11, 2.5, 2.5);
+    ctx.fill();
+    register(scene, 'flashbomb', el);
+  }
+  {
+    const [el, ctx] = canvas(18, 26);
+    ctx.fillStyle = '#7fd3ff';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.4;
+    roundRectPath(ctx, 4, 2, 10, 20, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = '#ffe066';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(9, 8);
+    ctx.lineTo(12, 13);
+    ctx.lineTo(8, 14);
+    ctx.lineTo(13, 20);
+    ctx.stroke();
+    register(scene, 'stormflask', el);
+  }
+  {
+    const [el, ctx] = canvas(28, 28);
+    ctx.strokeStyle = '#8a5a2e';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(4, 24);
+    ctx.lineTo(14, 6);
+    ctx.stroke();
+    ctx.strokeStyle = '#c3ced6';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(14, 6);
+    ctx.quadraticCurveTo(22, 6, 24, 14);
+    ctx.stroke();
+    ctx.fillStyle = '#c3ced6';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(24, 14);
+    ctx.lineTo(20, 18);
+    ctx.lineTo(26, 17);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    register(scene, 'fishingpole', el);
+  }
+  {
+    const [el, ctx] = canvas(18, 26);
+    ctx.fillStyle = '#6dd46a';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.4;
+    roundRectPath(ctx, 4, 2, 10, 20, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#d4ffc8';
+    ellipsePath(ctx, 9, 12, 2, 2);
+    ctx.fill();
+    register(scene, 'poisonflask', el);
+  }
   // Guard dog (fallback bake — runtime dogs use drawGuardDog with infusion skins)
   {
     const [el, ctx] = canvas(56, 40);

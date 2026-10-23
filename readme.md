@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.2.4-alpha-build`
+Version: `0.2.5-alpha-build`
 
 A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + Vite, packaged with Electron. Play as a lumberjack in a hostile forest: chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids.
 
@@ -17,18 +17,18 @@ A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + V
 | Elements | **6** (Fire, Water, Nature, Earth, Light, Darkness) |
 | Elemental enemy abilities | **18** (3 per element; more unlock with veterancy) |
 | True-boss signature moves | **10** (2 rolled per true boss) |
-| Auto weapons | **12** (max level **8**; up to **5** equipped) |
-| Unique weapon forms | **72** (12 weapons × 6 element infusions) |
-| Level-up passives | **20** |
+| Auto weapons | **18** (max level **8**; up to **5** equipped; **6** unlock via achievements) |
+| Unique weapon forms | **108** (18 weapons × 6 element infusions) |
+| Level-up passives | **20** (**4** unlock via achievements) |
 | Element infusion cards | **6** |
 | Bonus cards | **2** (gold pouch, full heal) |
-| Level-up card pool | **40** kinds (weapons + passives + infusions + bonuses) |
+| Level-up card pool | **46** kinds (weapons + passives + infusions + bonuses) |
 | World power-ups | **6** |
 | Camp upgrades | **11** |
 | Blacksmith gear slots | **14** |
 | Gear quality tiers | **6** (Poor → Legendary) |
 | Permanent meta upgrades | **15** |
-| Achievements | **10** (permanent credit rewards) |
+| Achievements | **10** (credits ×10 + weapon/card unlocks) |
 | World landmarks (POIs) | **4** kinds (den, wagon, shrine, vein; dawn reshuffle) |
 | Run mutators | **5** (stackable challenges) |
 | Win goals | **4** (Endless / Easy 6 / Medium 12 / Hard 18) |
@@ -48,7 +48,7 @@ Threat grows over time. Beasts gain **veterancy stars** and can roll **elements*
 
 1. **Chop & hunt** — fell trees, mine ore, defeat wildlife for resources and XP.
 2. **Explore landmarks** — dens, wagons, shrines, and rich veins (**E** nearby; reshuffle each dawn).
-3. **Level up** — choose from the **40**-kind card pool (weapons, passives, infusions, bonuses; **max 5** weapons).
+3. **Level up** — choose from the **46**-kind card pool (weapons, passives, infusions, bonuses; **max 5** weapons; some unlock via achievements).
 4. **Fortify** — upgrade the camp (**11** buildings), towers, production, and blacksmith.
 5. **Survive the cycle** — daytime assault waves, dusk warnings, then night raids (miniboss most nights; true boss every **3rd** night with elite guards).
 
@@ -85,9 +85,9 @@ Cabin and walls fully repair at dawn if you survive the night.
 
 ### Player arsenal
 
-- **12 auto weapons** — axe, hatchet, saw, aura, dynamite, pike, crossbow, spikes, hammerfall, longbow, knife, guard dog.
-- Max a weapon (**Lv 8**) and take its **infusion** to awaken a **unique elemental form** (**72** named forms).
-- **20 passives** — damage, speed, armor, regen, crit, dash charges, greed/devil/angel trades, and **6** elemental masteries.
+- **18 auto weapons** — starter kit (axe, hatchet, saw, aura, dynamite, pike, crossbow, spikes, hammerfall, longbow, knife, guard dog) plus achievement unlocks: chain & hook, snare trap, fishing pole, lightning flask, flash bomb, poison bottle.
+- Max a weapon (**Lv 8**) and take its **infusion** to awaken a **unique elemental form** (**108** named forms).
+- **20 passives** — damage, speed, armor, regen, crit, dash charges, greed/devil/angel trades (angel = **% max HP**), and **6** elemental masteries; greed/devil/angel/extra hands unlock via win goals / Fully Armed.
 - **6 power-ups** — magnet, fury, regen, haste, hearts (kill heals), cataclysm nuke.
 - Blacksmith gear: **2** weapon slots, **7** armor, **5** accessories.
 
@@ -97,7 +97,7 @@ Cabin and walls fully repair at dawn if you survive the night.
 
 ### Meta progress
 
-Credits at end of run buy **15** permanent character upgrades (vitality, damage, rerolls, banishes, walls, towers, smith luck, and more). **Codex discoveries** and **achievements** also grant small permanent credit rewards. Saved via Electron `userData` (`forestSave`).
+Credits at end of run buy **15** permanent character upgrades (vitality, damage, rerolls, banishes, walls, towers, smith luck, and more). **Codex discoveries** and **achievements** grant permanent credits; achievements also unlock weapons and risk/reward cards in the level-up pool. Saved via Electron `userData` (`forestSave`).
 
 ---
 

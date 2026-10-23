@@ -465,6 +465,7 @@ body {
   font-weight: 900;
   letter-spacing: 0.02em;
   color: #fff;
+  text-shadow: none;
   background: color-mix(in srgb, var(--mov, #ff4d6d) 55%, #1a1010);
   border: 1px solid color-mix(in srgb, var(--mov, #ff4d6d) 80%, #fff);
   white-space: nowrap;
@@ -497,6 +498,8 @@ body {
   font-size: 0.78rem;
   font-weight: 900;
   color: #1a140c;
+  /* Banner text-shadow inherits and doubles the label — kill it on chips. */
+  text-shadow: none;
   background: color-mix(in srgb, var(--sp, #c4a574) 78%, #fff);
   border: 1px solid color-mix(in srgb, var(--sp, #c4a574) 55%, #2a1b12);
 }
@@ -1341,10 +1344,13 @@ body {
   overflow: hidden;
   box-sizing: border-box;
 }
-.fs-glossary-icon svg {
+.fs-glossary-icon svg,
+.fs-glossary-icon .fs-glossary-animal {
   width: 1.75em;
   height: 1.75em;
   display: block;
+  object-fit: contain;
+  image-rendering: auto;
 }
 
 .fs-glossary-swatch {

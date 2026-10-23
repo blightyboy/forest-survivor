@@ -28,6 +28,8 @@ export class ArsenalSystem {
   passives: Record<string, number> = {};
   usedElements: Record<string, boolean> = {};
   banished = new Set<string>();
+  /** Meta achievement ids — filters gated weapons/passives in the card pool. */
+  achievements: string[] = [];
 
   addWeapon(id: string, level = 1) {
     if (!WEAPON_DEFS[id]) return false;
@@ -120,7 +122,9 @@ export class ArsenalSystem {
 
   /** Legacy offers 5 cards per level-up (cardOptions(5, banished)). */
   rollCards(n = 5): LevelUpCard[] {
-    return levelUpCardOptions(n, this.cardState(), this.banished);
+    return levelUpCardOptions(n, this.cardState(), this.banished, {
+      achievements: this.achievements,
+    });
   }
 
   applyCard(card: LevelUpCard, player: RunPlayer): boolean {
@@ -189,9 +193,9 @@ export class ArsenalSystem {
     return 1 / Math.pow(0.93, this.passives.haste || 0);
   }
 
-  /** Flat vitality/angel only — full maxHp (incl. +10/level) is computed in recomputePlayerStats. */
+  /** Flat vitality only — angel is % max HP in recomputePlayerStats. */
   passiveMaxHpBonus(): number {
-    return (this.passives.vitality || 0) * 25 + (this.passives.angel || 0) * 30;
+    return (this.passives.vitality || 0) * 25;
   }
 
   elementMasteryBonus(element: ElementId | null | undefined): number {
