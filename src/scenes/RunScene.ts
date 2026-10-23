@@ -388,9 +388,12 @@ export class RunScene extends Phaser.Scene {
 
     this.ui = new DomUI();
     this.ui.beginRunHud();
-    this.combat.onPowerupBanner = (title, sub, color) => this.ui.banner(title, sub, color);
+    this.combat.onPowerupBanner = (title, sub, color, iconId) =>
+      this.ui.banner(title, sub, color, iconId ? { iconId } : undefined);
     this.camp.onCampAttack = () =>
-      this.ui.banner('The camp is under attack!', 'Defend the cabin or the run is over.', '#ff6b6b');
+      this.ui.banner('The camp is under attack!', 'Defend the cabin or the run is over.', '#ff6b6b', {
+        iconId: 'house',
+      });
     this.camp.onStructureHit = () => this.ui.flashCampHurt();
     this.camp.onRaidStart = (day, count, directions, speciesHint, topSpecies) => {
       const goalN = winGoalNights(this.winGoal);
@@ -402,6 +405,7 @@ export class RunScene extends Phaser.Scene {
         `${count} beasts from the ${directions}${species}`,
         gauntlet ? '#ffe08a' : '#ff6b6b',
         {
+          iconId: gauntlet ? 'world_win' : 'world_raids',
           subHtml: `${count} beasts from the ${directions}${species}${pills ? ` ${pills}` : ''}`,
         },
       );
@@ -415,29 +419,39 @@ export class RunScene extends Phaser.Scene {
         `${name}`,
         chips.length ? '' : 'Signature moves incoming',
         '#ff4d6d',
-        chips.length
-          ? {
-              subHtml: `Signature moves<div class="fs-boss-moves" style="justify-content:center;margin-top:6px">${chips.join('')}</div>`,
-            }
-          : undefined,
+        {
+          iconId: 'true_boss',
+          ...(chips.length
+            ? {
+                subHtml: `Signature moves<div class="fs-boss-moves" style="justify-content:center;margin-top:6px">${chips.join('')}</div>`,
+              }
+            : {}),
+        },
       );
     };
     this.camp.onNightBoss = (kind, day) => {
       const goalN = winGoalNights(this.winGoal);
       if (goalN > 0 && day === goalN) {
-        this.ui.banner('GAUNTLET BOSS', `Night ${day} — true boss + elite guards!`, '#ffe08a');
+        this.ui.banner('GAUNTLET BOSS', `Night ${day} — true boss + elite guards!`, '#ffe08a', {
+          iconId: 'world_win',
+        });
       } else if (kind === 'true') {
-        this.ui.banner('BOSS NIGHT', `Night ${day} — true boss and elite guards!`, '#ff4d6d');
+        this.ui.banner('BOSS NIGHT', `Night ${day} — true boss and elite guards!`, '#ff4d6d', {
+          iconId: 'true_boss',
+        });
       } else {
         this.ui.banner(
           day >= 7 ? 'Twin minibosses!' : 'Miniboss incoming!',
           'Elite guards hunt you and the camp.',
           '#c46bff',
+          { iconId: 'world_champions' },
         );
       }
     };
     this.animals.onDayBoss = (name) => {
-      this.ui.banner(`${name}!`, 'Elite guards hunt you and your camp.', '#c46bff');
+      this.ui.banner(`${name}!`, 'Elite guards hunt you and your camp.', '#c46bff', {
+        iconId: 'world_champions',
+      });
       this.ui.setTip(`${name} and guards hunt the camp!`);
     };
     this.wireUi();
@@ -464,7 +478,9 @@ export class RunScene extends Phaser.Scene {
         goal.nights > 0
           ? ` Win goal: ${goal.name} (${goal.nights} nights).`
           : '';
-      this.ui.banner('Day 1', `Chop, hunt, fortify. ${graceNote}${goalNote}`, '#ffe08a');
+      this.ui.banner('Day 1', `Chop, hunt, fortify. ${graceNote}${goalNote}`, '#ffe08a', {
+        iconId: this.graceLeft > 0 ? 'world_grace' : 'sun',
+      });
       this.day1BannerShown = true;
     }
 
@@ -556,7 +572,9 @@ export class RunScene extends Phaser.Scene {
         const name = this.arsenal.uniqueName(card.id);
         const el = this.arsenal.weaponElements[card.id];
         const col = (el && ELEMENTS[el]?.color) || '#ffe08a';
-        this.ui.banner('Unique unlocked!', name || card.id, col);
+        this.ui.banner('Unique unlocked!', name || card.id, col, {
+          iconId: el || card.id,
+        });
         Audio.playSfx('upgrade', 0.7);
         this.vfx?.sparkle(this.player.x, this.player.y, col);
       } else {
@@ -682,7 +700,7 @@ export class RunScene extends Phaser.Scene {
     const sub = unlockBits.length
       ? `+${got.credits} credits · Unlocked: ${unlockBits.join(', ')}`
       : `+${got.credits} credits`;
-    this.ui.banner(`Achievement: ${got.name}`, sub, '#ffe08a');
+    this.ui.banner(`Achievement: ${got.name}`, sub, '#ffe08a', { iconId: id });
   }
 
   private checkRaidAchievements() {
@@ -1107,7 +1125,10 @@ export class RunScene extends Phaser.Scene {
       this.graceLeft,
       (title, sub, color, topSpecies) => {
         const pills = this.ui.speciesPillsHtml(topSpecies || []);
-        this.ui.banner(title, sub, color, pills ? { subHtml: `${sub} ${pills}` } : undefined);
+        this.ui.banner(title, sub, color, {
+          iconId: 'world_assaults',
+          ...(pills ? { subHtml: `${sub} ${pills}` } : {}),
+        });
       },
     );
     this.animals.update(
@@ -1313,7 +1334,9 @@ export class RunScene extends Phaser.Scene {
       this.camp.onDawn();
       if (survived) this.animals.retreatRaiders();
       if (reward) {
-        this.ui.banner('Raid repelled!', `Reward: +${reward.wood} wood, +${reward.gold} gold`, '#9ef08a');
+        this.ui.banner('Raid repelled!', `Reward: +${reward.wood} wood, +${reward.gold} gold`, '#9ef08a', {
+          iconId: 'world_raids',
+        });
         this.checkRaidAchievements();
       }
       const goalN = winGoalNights(this.winGoal);
@@ -1345,12 +1368,14 @@ export class RunScene extends Phaser.Scene {
           'Boss night approaches!',
           `A true boss leads the raid from the ${dirs}. Fortify the camp!`,
           '#ff4d6d',
+          { iconId: 'true_boss' },
         );
       } else {
         this.ui.banner(
           'Dusk falls...',
           `Raiders gather to the ${dirs}. Get back to camp!`,
           '#ffb36b',
+          { iconId: 'world_daynight' },
         );
       }
       if (day === 1) this.offerTutorial('firstNight');
@@ -2294,7 +2319,9 @@ export class RunScene extends Phaser.Scene {
     this.ui.hideLevelUp();
     this.ui.hideCampShop();
     this.ui.cancelConfirm();
-    this.ui.banner('Victory!', `${goal.name} cleared — ${goal.badge || 'well fought'}`, goal.color);
+    this.ui.banner('Victory!', `${goal.name} cleared — ${goal.badge || 'well fought'}`, goal.color, {
+      iconId: 'world_win',
+    });
     this.ui.showGameOver(
       {
         reason: 'win',

@@ -510,10 +510,10 @@ export class CampSystem {
     return this.contains(x, y, pad);
   }
 
-  /** Red screen flash when camp / palisade is struck (throttled for continuous DPS). */
+  /** Red screen flash when camp / palisade is struck (cooldown so raids don't strobe). */
   notifyStructureHit() {
     if (this.structureHitFlashCd > 0) return;
-    this.structureHitFlashCd = 0.16;
+    this.structureHitFlashCd = 1.1;
     this.onStructureHit?.();
   }
 

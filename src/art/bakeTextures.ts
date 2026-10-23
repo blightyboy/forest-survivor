@@ -630,26 +630,42 @@ function bakeAxes(scene: Phaser.Scene) {
   }
   // Achievement weapons — compact projectiles / orbit tokens.
   {
-    const [el, ctx] = canvas(28, 28);
-    ctx.strokeStyle = '#8a9096';
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ctx.arc(10, 14, 5, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(15, 14);
-    ctx.lineTo(22, 14);
-    ctx.stroke();
-    ctx.fillStyle = '#c3ced6';
+    // Chain & Spikeball — ball with radial spikes for orbit sprites.
+    const [el, ctx] = canvas(40, 40);
+    const cx = 20;
+    const cy = 20;
     ctx.strokeStyle = OUTLINE;
-    ctx.lineWidth = 1.3;
-    ctx.beginPath();
-    ctx.moveTo(20, 10);
-    ctx.lineTo(26, 14);
-    ctx.lineTo(20, 18);
-    ctx.closePath();
+    ctx.lineWidth = 1.5;
+    ctx.fillStyle = '#c3ced6';
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const ix = cx + Math.cos(a) * 7;
+      const iy = cy + Math.sin(a) * 7;
+      const ox = cx + Math.cos(a) * 16;
+      const oy = cy + Math.sin(a) * 16;
+      const px = cx + Math.cos(a + 0.22) * 8.5;
+      const py = cy + Math.sin(a + 0.22) * 8.5;
+      const qx = cx + Math.cos(a - 0.22) * 8.5;
+      const qy = cy + Math.sin(a - 0.22) * 8.5;
+      ctx.beginPath();
+      ctx.moveTo(ix, iy);
+      ctx.lineTo(px, py);
+      ctx.lineTo(ox, oy);
+      ctx.lineTo(qx, qy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#6a7076';
+    ellipsePath(ctx, cx, cy, 8.5, 8.5);
     ctx.fill();
     ctx.stroke();
+    ctx.fillStyle = '#9aa0a6';
+    ellipsePath(ctx, cx - 2.5, cy - 2.5, 3.2, 2.8);
+    ctx.fill();
+    ctx.fillStyle = '#3a3e44';
+    ellipsePath(ctx, cx, cy, 2.4, 2.4);
+    ctx.fill();
     register(scene, 'chainhook', el);
   }
   {
@@ -702,27 +718,39 @@ function bakeAxes(scene: Phaser.Scene) {
     register(scene, 'stormflask', el);
   }
   {
-    const [el, ctx] = canvas(28, 28);
+    const [el, ctx] = canvas(28, 36);
     ctx.strokeStyle = '#8a5a2e';
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth = 2.6;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(4, 24);
-    ctx.lineTo(14, 6);
+    ctx.moveTo(8, 32);
+    ctx.lineTo(8, 4);
     ctx.stroke();
-    ctx.strokeStyle = '#c3ced6';
+    // Reel
+    ctx.fillStyle = '#c4a35a';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.3;
+    ellipsePath(ctx, 8, 20, 4.2, 4.2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#5a3a1a';
+    ellipsePath(ctx, 8, 20, 1.5, 1.5);
+    ctx.fill();
+    // Line droop + hook
+    ctx.strokeStyle = '#dfe7ec';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(14, 6);
-    ctx.quadraticCurveTo(22, 6, 24, 14);
+    ctx.moveTo(8, 4);
+    ctx.quadraticCurveTo(18, 6, 22, 16);
+    ctx.quadraticCurveTo(24, 22, 22, 28);
     ctx.stroke();
     ctx.fillStyle = '#c3ced6';
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.moveTo(24, 14);
-    ctx.lineTo(20, 18);
-    ctx.lineTo(26, 17);
+    ctx.moveTo(22, 28);
+    ctx.lineTo(19.5, 32);
+    ctx.lineTo(24.5, 31);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();

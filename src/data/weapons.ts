@@ -157,9 +157,9 @@ export const WEAPON_DEFS: Record<string, WeaponDef> = {
     }),
   },
   chainhook: {
-    name: 'Chain & Hook',
-    text: ['Iron hooks whirl on chains around you', '+1 hook', '+10 damage, wider orbit', 'Spin 25% faster', '+1 hook',
-      '+16 damage, wider orbit', '+12 damage, spin 20% faster', '+1 hook, +18 damage'],
+    name: 'Chain & Spikeball',
+    text: ['Spiked iron balls whirl on chains around you', '+1 ball', '+10 damage, wider orbit', 'Spin 25% faster', '+1 ball',
+      '+16 damage, wider orbit', '+12 damage, spin 20% faster', '+1 ball, +18 damage'],
     stats: (l) => ({
       count: 1 + at(l, 2, 1) + at(l, 5, 1) + at(l, 8, 1),
       dmg: 18 + at(l, 3, 10) + at(l, 6, 16) + at(l, 7, 12) + at(l, 8, 18),
@@ -210,7 +210,7 @@ export const WEAPON_DEFS: Record<string, WeaponDef> = {
     stats: (l) => ({
       count: 1 + at(l, 2, 1) + at(l, 4, 1) + at(l, 6, 1) + at(l, 8, 1),
       dmg: 14 + at(l, 3, 8) + at(l, 7, 12),
-      pull: 420 + at(l, 3, 80) + at(l, 7, 100) + at(l, 8, 80),
+      pull: 780 + at(l, 3, 140) + at(l, 7, 160) + at(l, 8, 120),
       range: 280 + at(l, 5, 40) + at(l, 8, 30),
       cd: l >= 5 ? 1.15 : 1.5,
     }),
@@ -282,8 +282,8 @@ export const UNIQUE_NAMES: Record<string, Partial<Record<ElementId, string>>> = 
     earth: 'Stonefang', light: 'Lightfang', darkness: 'Shade Hound',
   },
   chainhook: {
-    fire: 'Searing Flail', water: 'Anchor Flail', nature: 'Briar Flail',
-    earth: 'Chainbola', light: 'Halo Flail', darkness: 'Soul Flail',
+    fire: 'Meteor Flail', water: 'Tide Mace', nature: 'Thorn Flail',
+    earth: 'Quake Ball', light: 'Solar Flail', darkness: 'Void Flail',
   },
   trap: {
     fire: 'Cinder Snare', water: 'Frost Snare', nature: 'Root Snare',

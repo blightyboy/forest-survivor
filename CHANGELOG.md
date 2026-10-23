@@ -2,6 +2,22 @@
 
 All notable changes to Forest Survivor are documented here.
 
+## 0.2.6-alpha-build
+
+### Icons everywhere
+- Glossary icons now appear in-run: boss/elemental move chips, species pills, power-up/debuff HUD, element badges (loadout / gear / smith), mutator chips, grace HUD, and event banners (raids, assaults, achievements, victory)
+- New SVG icons for all 18 elemental enemy abilities and the 5 run mutators
+
+### Weapons & VFX
+- **Chain & Hook** renamed to **Chain & Spikeball** — spiked-ball orbit sprites, chain-link VFX, updated unique names
+- Lightning in a Bottle arcs are more electric (jagged multi-layer bolts, forks, impact sparks)
+- Fishing Pole: stronger pull, distinct line/hook VFX (not lightning), dedicated icon
+
+### Polish
+- Camp/palisade hurt flash softer and less frequent (1.1s cooldown)
+- Beaver log projectile slightly wider
+- Assault/raid species pills use animal art and no longer inherit banner text-shadow
+
 ## 0.2.5-alpha-build
 
 ### Achievements & unlocks
@@ -12,7 +28,7 @@ All notable changes to Forest Survivor are documented here.
 - Angel's Blessing: +12% max HP per stack (was +30 flat)
 
 ### New achievement weapons (6; each with 6 elemental unique forms)
-- **Chain & Hook** — orbiting hooks (First Blood)
+- **Chain & Spikeball** — orbiting spiked balls (First Blood)
 - **Snare Trap** — ground snares until stepped on (Trail Scout)
 - **Fishing Pole** — reel beasts toward you; more targets per level (Forest Chronicler)
 - **Lightning in a Bottle** — chain lightning jumps (Boss Hunter)

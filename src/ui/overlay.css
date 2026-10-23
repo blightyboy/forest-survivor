@@ -314,7 +314,7 @@ body {
 }
 .fs-banish-left b { color: #ffb0b0; }
 
-/* Red vignette when cabin / palisade takes a hit */
+/* Soft red vignette when cabin / palisade takes a hit (throttled in CampSystem). */
 .fs-camp-hurt {
   position: fixed;
   inset: 0;
@@ -323,20 +323,20 @@ body {
   opacity: 0;
   background: radial-gradient(
     ellipse at center,
-    rgba(180, 12, 24, 0) 28%,
-    rgba(190, 16, 28, 0.42) 72%,
-    rgba(140, 0, 12, 0.72) 100%
+    rgba(180, 12, 24, 0) 42%,
+    rgba(190, 16, 28, 0.16) 78%,
+    rgba(140, 0, 12, 0.28) 100%
   );
 }
 .fs-camp-hurt.flash {
-  animation: fs-camp-hurt-flash 0.36s ease-out forwards;
+  animation: fs-camp-hurt-flash 0.48s ease-out forwards;
 }
 @keyframes fs-camp-hurt-flash {
   0% {
-    opacity: 0.95;
+    opacity: 0.38;
   }
-  35% {
-    opacity: 0.7;
+  40% {
+    opacity: 0.22;
   }
   100% {
     opacity: 0;
@@ -354,6 +354,24 @@ body {
   pointer-events: none;
   text-shadow: 0 3px 0 rgba(20, 10, 5, 0.85), 0 8px 24px rgba(0, 0, 0, 0.45);
   max-width: min(720px, 90vw);
+}
+.fs-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45em;
+}
+.fs-banner-ico {
+  display: inline-flex;
+  width: 1.35em;
+  height: 1.35em;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 0 rgba(20, 10, 5, 0.7));
+}
+.fs-banner-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .fs-banner-title {
   font-size: clamp(1.5rem, 4vw, 2.25rem);
@@ -383,11 +401,26 @@ body {
   min-width: min(280px, 70vw);
 }
 .fs-event-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
   font-size: 0.72rem;
   font-weight: 900;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #9ef08a;
+}
+.fs-event-ico {
+  display: inline-flex;
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
+}
+.fs-event-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .fs-event-sub {
   margin-top: 2px;
@@ -416,6 +449,10 @@ body {
   text-align: center;
 }
 .fs-boss-name {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
   font-size: 1.125rem;
   font-weight: 900;
   letter-spacing: 0.06em;
@@ -423,6 +460,18 @@ body {
   color: #ffe0e8;
   text-shadow: 0 2px 0 #4a1020, 0 0 12px rgba(255, 60, 90, 0.45);
   margin-bottom: 6px;
+}
+.fs-boss-el {
+  display: inline-flex;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 0 #4a1020);
+}
+.fs-boss-el svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .fs-boss-track {
   height: 18px;
@@ -492,8 +541,10 @@ body {
   vertical-align: middle;
 }
 .fs-species-pill {
-  display: inline-block;
-  padding: 0.12em 0.45em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  padding: 0.1em 0.45em 0.1em 0.18em;
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 900;
@@ -502,6 +553,22 @@ body {
   text-shadow: none;
   background: color-mix(in srgb, var(--sp, #c4a574) 78%, #fff);
   border: 1px solid color-mix(in srgb, var(--sp, #c4a574) 55%, #2a1b12);
+}
+.fs-species-pill-ico {
+  display: inline-flex;
+  width: 1.25em;
+  height: 1.25em;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.12);
+}
+.fs-species-pill-ico img,
+.fs-species-pill-ico .fs-glossary-animal {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 .fs-glossary-card.locked {
   opacity: 0.72;
@@ -541,6 +608,17 @@ body {
   border: 2px solid rgba(255, 255, 255, 0.15);
   font-size: 0.72rem;
   font-weight: 900;
+}
+.fs-buff-ico {
+  display: inline-flex;
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
+}
+.fs-buff-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .fs-buff span { opacity: 0.85; font-variant-numeric: tabular-nums; }
 .fs-buff.fs-debuff {
@@ -683,6 +761,25 @@ body {
   border-radius: 50%;
   display: inline-block;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  vertical-align: middle;
+  margin-right: 0.2em;
+}
+.fs-shop-item .el-dot.el-ico {
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 0.25em;
+  background: color-mix(in srgb, var(--el, #ffe08a) 35%, transparent);
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.05em;
+  box-sizing: border-box;
+}
+.fs-shop-item .el-dot.el-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 /* ---------------------------------------------------------------- overlays */
@@ -791,6 +888,9 @@ body {
 }
 
 .fs-mutator-detail-row strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
   font-size: 0.88rem;
   font-weight: 900;
   color: var(--mut, #ffe08a);
@@ -842,9 +942,10 @@ body {
   flex-direction: column;
   min-height: 0;
   flex: 1 1 auto;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding-right: 2px;
+  /* Don't use overflow-y:auto here — it flashes a scrollbar on first paint
+     when rem/scale or chip wrap briefly exceeds max-height. Nested lists
+     (.fs-meta-list / .fs-glossary-list) own scrolling instead. */
+  overflow: hidden;
 }
 
 .fs-menu-view.hidden {
@@ -899,6 +1000,9 @@ body {
 }
 
 .fs-mutator-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
   border: 2px solid color-mix(in srgb, var(--mut, #ffe08a) 45%, transparent);
   background: rgba(20, 14, 10, 0.55);
   color: #f2e6d4;
@@ -910,6 +1014,17 @@ body {
   cursor: pointer;
   opacity: 0.72;
   transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.fs-mutator-chip-ico {
+  display: inline-flex;
+  width: 1.1em;
+  height: 1.1em;
+  flex-shrink: 0;
+}
+.fs-mutator-chip-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .fs-mutator-chip:hover {
@@ -924,12 +1039,37 @@ body {
 }
 
 .fs-mutator-hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
   font-size: 0.72rem;
   font-weight: 800;
   color: #ff9a6b;
-  max-width: 14em;
+  max-width: 16em;
   line-height: 1.25;
   opacity: 0.9;
+}
+.fs-mutator-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  padding: 0.12em 0.4em 0.12em 0.22em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mut, #ff9a6b) 22%, rgba(20, 14, 10, 0.75));
+  border: 1px solid color-mix(in srgb, var(--mut, #ff9a6b) 55%, transparent);
+  color: #f2e6d4;
+  white-space: nowrap;
+}
+.fs-mutator-pill-ico {
+  display: inline-flex;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+}
+.fs-mutator-pill-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .fs-menu-credits {
@@ -1275,12 +1415,39 @@ body {
 .fs-glossary-ability {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 0.35rem 0.55rem;
   padding: 0.45rem 0.55rem;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(255, 220, 160, 0.12);
+}
+.fs-glossary-ability-ico {
+  display: inline-flex;
+  width: 1.35em;
+  height: 1.35em;
+  flex-shrink: 0;
+}
+.fs-glossary-ability-ico svg,
+.fs-glossary-ability-ico .fs-glossary-swatch {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.fs-glossary-tag-ico {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+}
+.fs-tag-ico {
+  display: inline-flex;
+  width: 0.95em;
+  height: 0.95em;
+}
+.fs-tag-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .fs-glossary-ability b {
@@ -2033,6 +2200,16 @@ body {
   overflow: hidden;
   line-height: 1;
 }
+.fs-gear-elem-ico {
+  display: inline-flex;
+  width: 1.15em;
+  height: 1.15em;
+}
+.fs-gear-elem-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
 
 /* ---- bottom-left loadout (weapons / passives) ---- */
 .fs-loadout {
@@ -2310,6 +2487,26 @@ body {
   height: 0.45em;
   border-radius: 50%;
   box-shadow: 0 0 4px currentColor;
+}
+.fs-el-badge {
+  position: absolute;
+  top: 0.1em;
+  right: 0.1em;
+  width: 0.85em;
+  height: 0.85em;
+  border-radius: 0.2em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--el, #ffe08a) 55%, #1a1208);
+  border: 1px solid color-mix(in srgb, var(--el, #ffe08a) 80%, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.fs-el-badge svg {
+  width: 85%;
+  height: 85%;
+  display: block;
 }
 
 /* ---- pause character sheet ---- */

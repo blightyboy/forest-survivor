@@ -40,7 +40,7 @@ import {
   type BossAbilityId,
 } from '../systems/EnemyAbilities';
 import { COACH_STEPS } from '../data/tutorials';
-import { MUTATORS, MUTATOR_BY_ID, mutatorLabelList, type MutatorId } from '../data/mutators';
+import { MUTATORS, MUTATOR_BY_ID, type MutatorId } from '../data/mutators';
 import { WIN_GOALS, WIN_GOAL_BY_ID, type WinGoalId } from '../data/winGoals';
 import {
   ACHIEVEMENTS,
@@ -314,11 +314,14 @@ export class DomUI {
       <div class="fs-boss-sub" id="boss-sub"></div>
     `;
     this.bannerEl.innerHTML = `
-      <div class="fs-banner-title" id="banner-title"></div>
+      <div class="fs-banner-head">
+        <span class="fs-banner-ico hidden" id="banner-ico"></span>
+        <div class="fs-banner-title" id="banner-title"></div>
+      </div>
       <div class="fs-banner-sub" id="banner-sub"></div>
     `;
     this.eventHudEl.innerHTML = `
-      <div class="fs-event-title" id="event-title">Grace</div>
+      <div class="fs-event-title"><span class="fs-event-ico" id="event-ico">${ICONS.world_grace || ''}</span><span id="event-title">Grace</span></div>
       <div class="fs-event-sub" id="event-sub">Wildlife is peaceful</div>
       <div class="fs-event-timer" id="event-timer">0:30</div>
     `;
@@ -329,7 +332,7 @@ export class DomUI {
     if (btn) btn.innerHTML = Audio.muted ? ICONS.mute : ICONS.sound;
   }
 
-  /** Red edge vignette when the cabin or a palisade takes a hit. */
+  /** Soft red edge vignette when the cabin or a palisade takes a hit. */
   flashCampHurt() {
     const el = this.campHurtEl;
     el.classList.remove('flash');
@@ -340,16 +343,32 @@ export class DomUI {
     this.campHurtTimer = setTimeout(() => {
       el.classList.remove('flash');
       this.campHurtTimer = null;
-    }, 380);
+    }, 500);
   }
 
   /** Legacy-style center banner (day / raid / assault announcements). */
-  banner(title: string, sub = '', color = '#ffe08a', opts?: { subHtml?: string }) {
+  banner(
+    title: string,
+    sub = '',
+    color = '#ffe08a',
+    opts?: { subHtml?: string; iconId?: string },
+  ) {
     const titleEl = this.bannerEl.querySelector('#banner-title') as HTMLElement | null;
     const subEl = this.bannerEl.querySelector('#banner-sub') as HTMLElement | null;
+    const icoEl = this.bannerEl.querySelector('#banner-ico') as HTMLElement | null;
     if (titleEl) {
       titleEl.textContent = title;
       titleEl.style.color = color;
+    }
+    if (icoEl) {
+      const svg = opts?.iconId ? icon(opts.iconId) : '';
+      if (svg) {
+        icoEl.innerHTML = svg;
+        icoEl.classList.remove('hidden');
+      } else {
+        icoEl.innerHTML = '';
+        icoEl.classList.add('hidden');
+      }
     }
     if (subEl) {
       if (opts?.subHtml != null) subEl.innerHTML = opts.subHtml;
@@ -360,14 +379,17 @@ export class DomUI {
     this.bannerTimer = setTimeout(() => this.bannerEl.classList.add('hidden'), 4200);
   }
 
-  /** Species color pills for raid / assault telegraphs. */
+  /** Species pills with glossary animal art for raid / assault telegraphs. */
   speciesPillsHtml(speciesIds: string[], max = 3): string {
     const bits: string[] = [];
     for (const id of speciesIds.slice(0, max)) {
       const sp = SPECIES[id];
       if (!sp) continue;
+      const ico = animalIconHtml(id, 'basic', 36);
       bits.push(
-        `<span class="fs-species-pill" style="--sp:${sp.color}" title="${sp.name}">${sp.name}</span>`,
+        `<span class="fs-species-pill" style="--sp:${sp.color}" title="${sp.name}">` +
+          (ico ? `<span class="fs-species-pill-ico">${ico}</span>` : '') +
+          `<span>${sp.name}</span></span>`,
       );
     }
     return bits.length ? `<span class="fs-species-pills">${bits.join('')}</span>` : '';
@@ -381,6 +403,21 @@ export class DomUI {
     return `<span class="fs-boss-move" title="${def.name}: ${def.desc}" style="--mov:${def.color || '#ff4d6d'}"><span class="fs-boss-move-ico">${ico}</span><span class="fs-boss-move-name">${def.name}</span></span>`;
   }
 
+  /** Elemental ability chip with glossary icon. */
+  elemMoveChipHtml(id: string): string {
+    const def = ELEMENT_ABILITY_BY_ID[id];
+    if (!def) return '';
+    const ico = icon(id) || this.glossarySwatch(def.color || '#c4a35a');
+    return `<span class="fs-boss-move" title="${def.name}: ${def.desc}" style="--mov:${def.color || '#c4a35a'}"><span class="fs-boss-move-ico">${ico}</span><span class="fs-boss-move-name">${def.name}</span></span>`;
+  }
+
+  /** Small element glyph used in loadout / shop / gear HUD. */
+  private elementGlyph(elId: string | null | undefined): string {
+    if (!elId) return '';
+    const key = ELEMENT_ICON[elId] || elId;
+    return icon(key, elId) || icon(elId);
+  }
+
   /** Top-center event strip — start grace countdown (same slot as banners). */
   updateEventHud(graceLeft: number) {
     if (graceLeft > 0.05) {
@@ -388,9 +425,11 @@ export class DomUI {
       const mm = Math.floor(secs / 60);
       const ss = secs % 60;
       const title = this.eventHudEl.querySelector('#event-title');
+      const ico = this.eventHudEl.querySelector('#event-ico');
       const sub = this.eventHudEl.querySelector('#event-sub');
       const timer = this.eventHudEl.querySelector('#event-timer');
       if (title) title.textContent = 'Grace';
+      if (ico) ico.innerHTML = ICONS.world_grace || '';
       if (sub) sub.textContent = 'Wildlife ignores you and the camp — until you strike';
       if (timer) timer.textContent = `${mm}:${String(ss).padStart(2, '0')}`;
       this.eventHudEl.classList.remove('hidden');
@@ -418,7 +457,15 @@ export class DomUI {
     const name = this.bossHudEl.querySelector('#boss-name');
     const fill = this.bossHudEl.querySelector('#boss-fill') as HTMLElement | null;
     const sub = this.bossHudEl.querySelector('#boss-sub');
-    if (name) name.textContent = boss.name;
+    if (name) {
+      const elGlyph = boss.element ? this.elementGlyph(boss.element) : '';
+      if (elGlyph) {
+        name.innerHTML =
+          `<span class="fs-boss-el">${elGlyph}</span><span>${boss.name}</span>`;
+      } else {
+        name.textContent = boss.name;
+      }
+    }
     if (fill) fill.style.width = `${Math.max(0, Math.min(1, boss.hp / boss.maxHp)) * 100}%`;
     if (sub) {
       if (boss.sub != null) {
@@ -431,11 +478,8 @@ export class DomUI {
         }
         if (boss.elemMoves?.length) {
           for (const id of boss.elemMoves) {
-            const def = ELEMENT_ABILITY_BY_ID[id];
-            if (!def) continue;
-            chips.push(
-              `<span class="fs-boss-move" title="${def.name}" style="--mov:${def.color || '#c4a35a'}"><span class="fs-boss-move-name">${def.name}</span></span>`,
-            );
+            const chip = this.elemMoveChipHtml(id);
+            if (chip) chips.push(chip);
           }
         }
         sub.innerHTML = chips.length
@@ -450,8 +494,10 @@ export class DomUI {
     const push = (id: string, left: number) => {
       const def = POWERUPS[id];
       if (!def || left <= 0) return;
+      const ico = icon(id) || '';
       bits.push(
         `<div class="fs-buff" style="border-color:${def.color}" title="${def.name}: ${def.desc}">` +
+          (ico ? `<span class="fs-buff-ico">${ico}</span>` : '') +
           `<b style="color:${def.color}">${def.label}</b><span>${Math.ceil(left)}s</span></div>`,
       );
     };
@@ -465,18 +511,21 @@ export class DomUI {
       for (const b of player.poisons) maxLife = Math.max(maxLife, b.life);
       bits.push(
         `<div class="fs-buff fs-debuff" style="border-color:#6dd46a" title="Poisoned — taking damage over time">` +
+          `<span class="fs-buff-ico">${icon('elem_poison', 'nature')}</span>` +
           `<b style="color:#6dd46a">Poison</b><span>${Math.ceil(maxLife)}s</span></div>`,
       );
     }
     if ((player.burnT || 0) > 0) {
       bits.push(
         `<div class="fs-buff fs-debuff" style="border-color:#ff8a3d" title="Burning — standing in a damage pool">` +
+          `<span class="fs-buff-ico">${icon('elem_scorch', 'fire')}</span>` +
           `<b style="color:#ff8a3d">Burn</b><span>!</span></div>`,
       );
     }
     if (player.slowT > 0 && player.slow > 0.05) {
       bits.push(
         `<div class="fs-buff fs-debuff" style="border-color:#9b7bde" title="Slowed">` +
+          `<span class="fs-buff-ico">${icon('elem_gloom', 'darkness')}</span>` +
           `<b style="color:#9b7bde">Slow</b><span>${Math.ceil(player.slowT)}s</span></div>`,
       );
     }
@@ -667,8 +716,9 @@ export class DomUI {
           })
           .join('');
         const el = item.element && ELEMENTS[item.element];
-        const elDot = el
-          ? `<span class="el-dot" style="background:${el.color}"></span>`
+        const elGlyph = el ? this.elementGlyph(el.id) : '';
+        const elDot = elGlyph
+          ? `<span class="el-dot el-ico" style="--el:${el!.color}" title="${el!.name}">${elGlyph}</span>`
           : '';
         rows.push(
           `<button type="button" class="fs-shop-item${afford ? ' afford' : ''}" data-shop="${i}">` +
@@ -1380,7 +1430,11 @@ export class DomUI {
       </div>`;
     }
     const el = ELEMENT_PASSIVES[id];
-    const elTag = el ? el.charAt(0).toUpperCase() + el.slice(1) : '';
+    const elName = el ? el.charAt(0).toUpperCase() + el.slice(1) : '';
+    const elIco = el ? this.elementGlyph(el) : '';
+    const elTag = elName
+      ? `<span class="fs-glossary-tag fs-glossary-tag-ico">${elIco ? `<span class="fs-tag-ico">${elIco}</span>` : ''}${elName}</span>`
+      : '';
     return `
       <div class="fs-glossary-card">
         <div class="fs-glossary-icon">${this.glossaryIcon(id)}</div>
@@ -1388,7 +1442,7 @@ export class DomUI {
           <div class="fs-glossary-title">
             <span class="fs-glossary-name">${def.name}</span>
             <span class="fs-glossary-tag">Max ${def.max}</span>
-            ${elTag ? `<span class="fs-glossary-tag">${elTag}</span>` : ''}
+            ${elTag}
             ${gate ? `<span class="fs-glossary-tag">Achievement</span>` : ''}
           </div>
           <div class="fs-glossary-desc">${def.desc}</div>
@@ -1506,9 +1560,10 @@ export class DomUI {
     const opp = ELEMENTS[def.opposite];
     const pool = ELEMENT_ABILITY_POOLS[el as keyof typeof ELEMENT_ABILITY_POOLS] || [];
     const moves = pool
-      .map(
-        (ab, i) =>
-          `<div class="fs-glossary-ability">
+      .map((ab, i) => {
+        const ico = icon(ab.id) || this.glossarySwatch(ab.color || '#888');
+        return `<div class="fs-glossary-ability">
+            <span class="fs-glossary-ability-ico">${ico}</span>
             <b>${ab.name}</b>
             <span class="fs-glossary-tag">${i === 0 ? 'Core' : `★ unlock`}</span>
             <span class="fs-glossary-ability-desc">${ab.desc}</span>
@@ -1516,8 +1571,8 @@ export class DomUI {
               ${this.glossaryStat('CD', `${ab.cd}s`)}
               ${this.glossaryStat('Range', ab.range)}
             </span>
-          </div>`,
-      )
+          </div>`;
+      })
       .join('');
     return `
       <div class="fs-glossary-card">
@@ -2440,8 +2495,11 @@ export class DomUI {
     const cur = settings.winGoal;
     row.innerHTML = WIN_GOALS.map((g) => {
       const on = cur === g.id;
+      const ico = icon('world_win');
       return `<button type="button" class="fs-mutator-chip${on ? ' on' : ''}" data-win-goal="${g.id}"
-        style="--mut:${g.color}" title="${g.desc}">${g.name}${g.nights ? ` · ${g.nights}n` : ''}</button>`;
+        style="--mut:${g.color}" title="${g.desc}">` +
+        (ico ? `<span class="fs-mutator-chip-ico">${ico}</span>` : '') +
+        `${g.name}${g.nights ? ` · ${g.nights}n` : ''}</button>`;
     }).join('');
     row.querySelectorAll('[data-win-goal]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -2461,8 +2519,11 @@ export class DomUI {
     const active = new Set(settings.mutators);
     row.innerHTML = MUTATORS.map((m) => {
       const on = active.has(m.id);
+      const ico = icon(`mut_${m.id}`, 'world_mutators');
       return `<button type="button" class="fs-mutator-chip${on ? ' on' : ''}" data-mutator="${m.id}"
-        style="--mut:${m.color}" title="${m.desc}">${m.name}</button>`;
+        style="--mut:${m.color}" title="${m.desc}">` +
+        (ico ? `<span class="fs-mutator-chip-ico">${ico}</span>` : '') +
+        `${m.name}</button>`;
     }).join('');
     row.querySelectorAll('[data-mutator]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -2493,16 +2554,18 @@ export class DomUI {
     panel.classList.remove('hidden');
     const rows: string[] = [];
     if (showGoal) {
+      const gIco = icon('world_win');
       rows.push(`<li class="fs-mutator-detail-row" style="--mut:${goal.color}">
-        <strong>Win · ${goal.name}</strong>
+        <strong>${gIco ? `<span class="fs-mutator-pill-ico">${gIco}</span>` : ''}Win · ${goal.name}</strong>
         <span>${goal.desc}${goal.badge ? ` · Badge: ${goal.badge}` : ''}</span>
       </li>`);
     }
     for (const id of ids) {
       const m = MUTATOR_BY_ID[id];
       if (!m) continue;
+      const ico = icon(`mut_${id}`, 'world_mutators');
       rows.push(`<li class="fs-mutator-detail-row" style="--mut:${m.color}">
-        <strong>${m.name}</strong>
+        <strong>${ico ? `<span class="fs-mutator-pill-ico">${ico}</span>` : ''}${m.name}</strong>
         <span>${m.desc}</span>
       </li>`);
     }
@@ -2518,11 +2581,21 @@ export class DomUI {
     if (!el) return;
     if (!ids.length) {
       el.classList.add('hidden');
-      el.textContent = '';
+      el.innerHTML = '';
       return;
     }
     el.classList.remove('hidden');
-    el.textContent = mutatorLabelList(ids);
+    el.innerHTML = ids
+      .map((id) => {
+        const m = MUTATOR_BY_ID[id];
+        if (!m) return '';
+        const ico = icon(`mut_${id}`, 'world_mutators');
+        return `<span class="fs-mutator-pill" style="--mut:${m.color}" title="${m.desc}">` +
+          (ico ? `<span class="fs-mutator-pill-ico">${ico}</span>` : '') +
+          `<span>${m.name}</span></span>`;
+      })
+      .filter(Boolean)
+      .join('');
   }
 
   /** Opens the in-menu Character Upgrades view (legacy menuMeta). */
@@ -2773,8 +2846,11 @@ export class DomUI {
     }
     if (atkEl && ELEMENTS[atkEl]) {
       const e = ELEMENTS[atkEl];
+      const glyph = this.elementGlyph(e.id);
       bits.push(
-        `<div class="fs-gear-elem" data-tip-kind="elem" data-tip-id="${e.id}" style="background:${e.color}">${e.name[0]}</div>`,
+        `<div class="fs-gear-elem" data-tip-kind="elem" data-tip-id="${e.id}" style="background:${e.color}" title="${e.name}">` +
+          (glyph ? `<span class="fs-gear-elem-ico">${glyph}</span>` : e.name[0]) +
+        `</div>`,
       );
     }
     this.gearHudEl.innerHTML = bits.join('');
@@ -2807,11 +2883,14 @@ export class DomUI {
       const unique = arsenal.isUnique(id);
       if (unique) arsenal.weaponUnique[id] = true;
       const border = elDef ? `style="border-color:${elDef.color}${unique ? `;box-shadow:0 0 8px ${elDef.color}` : ''}"` : '';
+      const elGlyph = elDef ? this.elementGlyph(el) : '';
       bits.push(
         `<div class="fs-load ${unique ? 'unique' : ''}" data-tip-kind="weapon" data-tip-id="${id}" ${border}>` +
           `<span class="fs-load-ico">${weaponIcon(id, el || null)}</span>` +
           `<span>${unique ? '★' : arsenal.weapons[id]}</span>` +
-          (elDef ? `<i class="fs-el-dot" style="background:${elDef.color}"></i>` : '') +
+          (elGlyph
+            ? `<span class="fs-el-badge" title="${elDef!.name}" style="--el:${elDef!.color}">${elGlyph}</span>`
+            : '') +
         `</div>`,
       );
     }

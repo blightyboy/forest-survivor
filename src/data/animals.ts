@@ -149,7 +149,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     windup: 0.48, lungeSpeed: 240, lungeTime: 0.16, cooldown: 1.25, kb: 280, stagger: true,
     meat: [1, 2], goldChance: 0.35, gold: 1, xp: 7, height: 30, bodyOff: 11, eye: [15, -17],
     color: '#7a4a28',
-    ranged: true, range: 360, preferRange: 250, shotSpeed: 300, shotRadius: 11,
+    ranged: true, range: 360, preferRange: 250, shotSpeed: 300, shotRadius: 15,
     shotKind: 'log', shotColor: '#8a5a2a', shotSpin: 7,
     bossCombat: { dmg: 11, chase: 120, aggro: 370, windup: 0.4, cooldown: 1.05, range: 420, preferRange: 270, shotSpeed: 340 },
   },

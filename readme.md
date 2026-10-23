@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.2.5-alpha-build`
+Version: `0.2.6-alpha-build`
 
 A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + Vite, packaged with Electron. Play as a lumberjack in a hostile forest: chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids.
 
@@ -56,7 +56,7 @@ Optional **run mutators** on the main menu (Savage, No Grace, Glass, Siege, Scar
 
 Optional **win goals**: Endless, Easy (6 nights), Medium (12), Hard (18). Survive the final gauntlet night for a badge and bonus credits. Mid-run **checkpoints** save at dusk/dawn/pause; pause **Save & Quit** keeps Continue available.
 
-**Raid telegraphs** show wave species (text + color pills). True bosses announce signature moves with **icons** on the HUD.
+**Raid telegraphs** show wave species (animal icons + pills). Boss and elemental moves, power-ups, elements, mutators, and major banners reuse the same **glossary icons** in-run.
 
 ### Opening grace
 
@@ -85,7 +85,7 @@ Cabin and walls fully repair at dawn if you survive the night.
 
 ### Player arsenal
 
-- **18 auto weapons** — starter kit (axe, hatchet, saw, aura, dynamite, pike, crossbow, spikes, hammerfall, longbow, knife, guard dog) plus achievement unlocks: chain & hook, snare trap, fishing pole, lightning flask, flash bomb, poison bottle.
+- **18 auto weapons** — starter kit (axe, hatchet, saw, aura, dynamite, pike, crossbow, spikes, hammerfall, longbow, knife, guard dog) plus achievement unlocks: chain & spikeball, snare trap, fishing pole, lightning flask, flash bomb, poison bottle.
 - Max a weapon (**Lv 8**) and take its **infusion** to awaken a **unique elemental form** (**108** named forms).
 - **20 passives** — damage, speed, armor, regen, crit, dash charges, greed/devil/angel trades (angel = **% max HP**), and **6** elemental masteries; greed/devil/angel/extra hands unlock via win goals / Fully Armed.
 - **6 power-ups** — magnet, fury, regen, haste, hearts (kill heals), cataclysm nuke.

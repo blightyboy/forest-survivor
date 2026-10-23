@@ -102,13 +102,14 @@ type ArmedTrap = {
   gfx: Phaser.GameObjects.Image;
 };
 
-/** Short-lived lightning arc between chain jumps. */
+/** Short-lived lightning arc / fishing line. */
 type LightningArc = {
   x0: number;
   y0: number;
   x1: number;
   y1: number;
   life: number;
+  maxLife: number;
   color: number;
   gfx: Phaser.GameObjects.Graphics;
 };
@@ -364,7 +365,7 @@ export class CombatSystem {
     this.spawnPickup('powerup', a.x + rand(-4, 4), a.y + rand(-4, 4), 1, pick);
   }
 
-  onPowerupBanner?: (title: string, sub: string, color: string) => void;
+  onPowerupBanner?: (title: string, sub: string, color: string, iconId?: string) => void;
 
   activatePowerup(type: string, player: RunPlayer) {
     this.grantPlayer = player;
@@ -376,12 +377,17 @@ export class CombatSystem {
     Audio.playSfx('upgrade', 1.2);
     if (type === 'magnet') {
       this.vacuumPickups(player);
-      this.onPowerupBanner?.(def.name, def.desc, def.color);
+      this.onPowerupBanner?.(def.name, def.desc, def.color, type);
       return;
     }
     if (type === 'nuke') {
       this.triggerNuke(player);
-      this.onPowerupBanner?.('Cataclysm!', 'Forest and beasts scoured — loot rushes in. Bosses endure.', '#ffe066');
+      this.onPowerupBanner?.(
+        'Cataclysm!',
+        'Forest and beasts scoured — loot rushes in. Bosses endure.',
+        '#ffe066',
+        'nuke',
+      );
       return;
     }
     if (type === 'fury') player.buffFury = Math.max(player.buffFury, def.duration);
@@ -389,7 +395,7 @@ export class CombatSystem {
     else if (type === 'haste') player.buffHaste = Math.max(player.buffHaste, def.duration);
     else if (type === 'hearts') player.buffHearts = Math.max(player.buffHearts, def.duration);
     this.refreshBuffStats(player);
-    this.onPowerupBanner?.(def.name, `${def.desc} · ${def.duration}s`, def.color);
+    this.onPowerupBanner?.(def.name, `${def.desc} · ${def.duration}s`, def.color, type);
   }
 
   vacuumPickups(player: RunPlayer, style?: { ring?: string; label?: string }) {
@@ -1264,8 +1270,9 @@ export class CombatSystem {
     const st = this.arsenal.drawStyle('chainhook');
     const tex = this.scene.textures.exists('chainhook') ? 'chainhook' : 'hatchet';
 
+    const ballScale = st.unique ? 1.85 : 1.65;
     while (this.chainSprites.length < count) {
-      const spr = this.scene.add.image(0, 0, tex).setDepth(12).setScale(st.unique ? 1.15 : 1);
+      const spr = this.scene.add.image(0, 0, tex).setDepth(12).setScale(ballScale);
       this.fxLayerSafeAdd(spr);
       this.chainSprites.push(spr);
     }
@@ -1298,7 +1305,7 @@ export class CombatSystem {
         .setRotation(ang + Math.PI / 2)
         .setDepth(Math.floor(ay) + 4)
         .clearTint()
-        .setScale(st.unique ? 1.15 : 1);
+        .setScale(ballScale);
       if (el && st.metal) {
         spr.setTint(Phaser.Display.Color.HexStringToColor(st.metal).color);
       }
@@ -1310,15 +1317,23 @@ export class CombatSystem {
           rich: st.unique,
         });
       }
-      // Chain link toward player.
+      // Chain links toward player.
       if (this.chainTrailGfx) {
         const linkCol = st.metal
           ? Phaser.Display.Color.HexStringToColor(st.metal).color
           : 0x8a9096;
-        this.chainTrailGfx.lineStyle(1.6, linkCol, 0.45);
+        this.chainTrailGfx.lineStyle(2.4, linkCol, 0.5);
         this.chainTrailGfx.lineBetween(player.x, player.y - 8, ax, ay);
+        // Link ticks along the chain.
+        for (let k = 1; k <= 3; k++) {
+          const t = k / 4;
+          const lx = player.x + (ax - player.x) * t;
+          const ly = player.y - 8 + (ay - (player.y - 8)) * t;
+          this.chainTrailGfx.fillStyle(linkCol, 0.55);
+          this.chainTrailGfx.fillCircle(lx, ly, 2.2);
+        }
       }
-      this.hitArea(ax, ay + 10, 15 * areaM, dmg, player, el, true, `chain${i}`);
+      this.hitArea(ax, ay + 10, 30 * areaM, dmg, player, el, true, `chain${i}`);
     }
   }
 
@@ -1345,7 +1360,7 @@ export class CombatSystem {
       const dist = rand(48, 140);
       const x = player.x + Math.cos(ang) * dist;
       const y = player.y + Math.sin(ang) * dist;
-      const gfx = this.scene.add.image(x, y, tex).setDepth(Math.floor(y) - 1).setScale(1.05);
+      const gfx = this.scene.add.image(x, y, tex).setDepth(Math.floor(y) - 1).setScale(2.1);
       if (el && ELEMENTS[el]) {
         gfx.setTint(Phaser.Display.Color.HexStringToColor(ELEMENTS[el].color).color);
       }
@@ -1417,13 +1432,15 @@ export class CombatSystem {
     let prevY = player.y - 20;
     const col = el && ELEMENTS[el]
       ? Phaser.Display.Color.HexStringToColor(ELEMENTS[el].color).color
-      : 0x7fd3ff;
+      : 0x9ae8ff;
     for (let i = 0; i < jumps && cur; i++) {
       hit.add(cur.uid);
-      this.spawnLightningArc(prevX, prevY, cur.x, cur.y - cur.radius, col);
+      const hx = cur.x;
+      const hy = cur.y - cur.radius;
+      this.spawnLightningArc(prevX, prevY, hx, hy, col);
       this.damageAnimal(cur, dmg * (1 - i * 0.06), player, el);
-      prevX = cur.x;
-      prevY = cur.y - cur.radius;
+      prevX = hx;
+      prevY = hy;
       let next: AnimalEntity | null = null;
       let nextBest = jumpR * jumpR;
       for (const a of this.animals.animals) {
@@ -1442,27 +1459,119 @@ export class CombatSystem {
   private spawnLightningArc(x0: number, y0: number, x1: number, y1: number, color: number) {
     const gfx = this.scene.add.graphics().setDepth(40);
     this.fxLayerSafeAdd(gfx);
-    gfx.lineStyle(2.4, color, 0.95);
+
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    const segs = Math.max(5, Math.round(len / 22));
+
+    // Jagged bolt polyline — stronger perpendicular whip in the middle.
+    const pts: { x: number; y: number }[] = [{ x: x0, y: y0 }];
+    for (let i = 1; i < segs; i++) {
+      const t = i / segs;
+      const whip = Math.sin(t * Math.PI);
+      const jitter = rand(-20, 20) * whip;
+      pts.push({
+        x: lerp(x0, x1, t) + nx * jitter + rand(-2.5, 2.5),
+        y: lerp(y0, y1, t) + ny * jitter + rand(-2.5, 2.5),
+      });
+    }
+    pts.push({ x: x1, y: y1 });
+
+    const strokeBolt = (w: number, col: number, a: number) => {
+      gfx.lineStyle(w, col, a);
+      gfx.beginPath();
+      gfx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) gfx.lineTo(pts[i].x, pts[i].y);
+      gfx.strokePath();
+    };
+
+    // Soft corona → colored body → white-hot core.
+    strokeBolt(9, color, 0.16);
+    strokeBolt(5.5, color, 0.38);
+    strokeBolt(3.1, color, 0.85);
+    strokeBolt(1.35, 0xffffff, 0.95);
+
+    // Side forks — short electric branches off mid segments.
+    const forks = 1 + (Math.random() < 0.65 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0);
+    for (let f = 0; f < forks; f++) {
+      const bi = 1 + Math.floor(Math.random() * Math.max(1, pts.length - 2));
+      const bx = pts[bi].x;
+      const by = pts[bi].y;
+      const ang = Math.atan2(dy, dx) + rand(-1.25, 1.25);
+      const fl = rand(16, 36);
+      const mx = bx + Math.cos(ang) * fl * 0.45 + nx * rand(-5, 5);
+      const my = by + Math.sin(ang) * fl * 0.45 + ny * rand(-5, 5);
+      const fx = bx + Math.cos(ang) * fl;
+      const fy = by + Math.sin(ang) * fl;
+      gfx.lineStyle(3.4, color, 0.4);
+      gfx.beginPath();
+      gfx.moveTo(bx, by);
+      gfx.lineTo(mx, my);
+      gfx.lineTo(fx, fy);
+      gfx.strokePath();
+      gfx.lineStyle(1.15, 0xffffff, 0.75);
+      gfx.beginPath();
+      gfx.moveTo(bx, by);
+      gfx.lineTo(mx, my);
+      gfx.lineTo(fx, fy);
+      gfx.strokePath();
+    }
+
+    // Bright terminals.
+    gfx.fillStyle(color, 0.45);
+    gfx.fillCircle(x0, y0, 5);
+    gfx.fillCircle(x1, y1, 7);
+    gfx.fillStyle(0xffffff, 0.95);
+    gfx.fillCircle(x0, y0, 2);
+    gfx.fillCircle(x1, y1, 2.8);
+
+    this.lightningArcs.push({ x0, y0, x1, y1, life: 0.24, maxLife: 0.24, color, gfx });
+
+    const hex = `#${(color & 0xffffff).toString(16).padStart(6, '0')}`;
+    this.vfx?.sparks(x1, y1, 7, hex);
+    this.vfx?.sparks(x1, y1, 4, '#ffffff');
+    this.vfx?.ring(x1, y1, hex, 4, 28, 0.18);
+  }
+
+  /** Taut fishing line + hook tip — distinct from stormflask zig-zag arcs. */
+  private spawnFishingLine(x0: number, y0: number, x1: number, y1: number, color: number) {
+    const gfx = this.scene.add.graphics().setDepth(40);
+    this.fxLayerSafeAdd(gfx);
+    const mx = (x0 + x1) * 0.5;
+    const my = (y0 + y1) * 0.5 + 14;
+    // Cord shadow then main line (gentle sag, not lightning).
+    gfx.lineStyle(3.2, 0x2a1b12, 0.35);
     gfx.beginPath();
     gfx.moveTo(x0, y0);
-    const mids = 3;
-    for (let i = 1; i <= mids; i++) {
-      const t = i / (mids + 1);
-      const x = lerp(x0, x1, t) + rand(-10, 10);
-      const y = lerp(y0, y1, t) + rand(-8, 8);
-      gfx.lineTo(x, y);
-    }
+    gfx.lineTo(mx, my);
     gfx.lineTo(x1, y1);
     gfx.strokePath();
-    gfx.lineStyle(1, 0xffffff, 0.55);
+    gfx.lineStyle(2, color, 0.95);
+    gfx.beginPath();
+    gfx.moveTo(x0, y0);
+    gfx.lineTo(mx, my);
+    gfx.lineTo(x1, y1);
     gfx.strokePath();
-    this.lightningArcs.push({ x0, y0, x1, y1, life: 0.18, color, gfx });
+    // Hook at the catch.
+    const ang = Math.atan2(y1 - my, x1 - mx);
+    const hx = x1 + Math.cos(ang) * 5;
+    const hy = y1 + Math.sin(ang) * 5;
+    gfx.lineStyle(2.2, color, 1);
+    gfx.beginPath();
+    gfx.arc(hx, hy, 5, ang - 0.4, ang + 2.4, false);
+    gfx.strokePath();
+    gfx.fillStyle(color, 0.9);
+    gfx.fillCircle(x1, y1, 2.2);
+    this.lightningArcs.push({ x0, y0, x1, y1, life: 0.32, maxLife: 0.32, color, gfx });
   }
 
   private updateLightningArcs(dt: number) {
     for (const arc of this.lightningArcs) {
       arc.life -= dt;
-      arc.gfx.setAlpha(clamp(arc.life / 0.18, 0, 1));
+      arc.gfx.setAlpha(clamp(arc.life / Math.max(0.01, arc.maxLife), 0, 1));
     }
     compactInPlace(this.lightningArcs, (a) => {
       if (a.life <= 0) a.gfx.destroy();
@@ -1494,25 +1603,27 @@ export class CombatSystem {
     }
     this.armWeapon('fishingpole', true, stats.cd as number, cdM);
     candidates.sort((a, b) => a.d - b.d);
-    const col = el && ELEMENTS[el]
+    const lineCol = el && ELEMENTS[el]
       ? Phaser.Display.Color.HexStringToColor(ELEMENTS[el].color).color
-      : 0xc3ced6;
+      : 0xe8d4b0;
     for (let i = 0; i < Math.min(count, candidates.length); i++) {
       const a = candidates[i].a;
       const dx = player.x - a.x;
       const dy = player.y - a.y;
       const dist = Math.hypot(dx, dy) || 1;
-      // Reel toward player — bosses resist a bit.
-      const resist = a.boss || a.trueBoss ? 0.45 : a.big ? 0.7 : 1;
-      const step = Math.min(dist - 28, pull * 0.085 * resist);
+      // Hard reel — bosses still resist, but normal beasts slam in close.
+      const resist = a.boss || a.trueBoss ? 0.62 : a.big ? 0.85 : 1;
+      const step = Math.min(Math.max(0, dist - 16), pull * 0.32 * resist);
       if (step > 0) {
         a.x += (dx / dist) * step;
         a.y += (dy / dist) * step;
-        a.vx *= 0.3;
-        a.vy *= 0.3;
+        // Residual yank so they keep sliding toward you briefly.
+        a.vx = (dx / dist) * pull * 0.55 * resist;
+        a.vy = (dy / dist) * pull * 0.55 * resist;
       }
-      this.spawnLightningArc(player.x, player.y - 18, a.x, a.y - a.radius * 0.5, col);
+      this.spawnFishingLine(player.x + 10, player.y - 22, a.x, a.y - a.radius * 0.35, lineCol);
       this.damageAnimal(a, dmg, player, el);
+      this.vfx?.sparks(a.x, a.y - a.radius, 4, el ? ELEMENTS[el]?.color : '#e8d4b0');
     }
     Audio.playSfx('hit', 0.55);
   }

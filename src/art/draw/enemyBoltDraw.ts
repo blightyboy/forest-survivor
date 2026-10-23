@@ -60,8 +60,9 @@ export function drawEnemyBolt(ctx: Ctx, opts: EnemyBoltDrawOpts) {
   } else if (kind === 'log') {
     ctx.rotate(ang + rot);
     const L = r * 2.4;
-    const W = r * 0.85;
-    roundRectPath(ctx, -L / 2, -W / 2, L, W, 4);
+    // Thick trunk silhouette — was too skinny at gameplay distances.
+    const W = r * 1.7;
+    roundRectPath(ctx, -L / 2, -W / 2, L, W, 5);
     ctx.fillStyle = color || '#8a5a2a';
     ctx.fill();
     strokeOutlier(ctx, 2.4);
@@ -121,7 +122,7 @@ export function drawEnemyBolt(ctx: Ctx, opts: EnemyBoltDrawOpts) {
 /** Canvas size that fits scaled bolt art + outline + shadow for a given radius. */
 export function enemyBoltCanvasSize(r: number, kind: string) {
   const vr = r * ENEMY_BOLT_VISUAL;
-  const pad = kind === 'log' ? vr * 3.4 + 28 : vr * 3.0 + 30;
+  const pad = kind === 'log' ? vr * 3.8 + 32 : vr * 3.0 + 30;
   const s = Math.ceil(pad * 2);
   return Math.max(64, s);
 }
