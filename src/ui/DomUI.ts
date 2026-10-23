@@ -106,6 +106,8 @@ export class DomUI {
   campHurtEl: HTMLElement;
   bossHudEl: HTMLElement;
   buffHudEl: HTMLElement;
+  /** Structural key so we rebuild boss cards only when the set changes. */
+  private bossHudStructKey = '';
   private campHurtTimer: ReturnType<typeof setTimeout> | null = null;
   private lastGearHudKey = '';
   private campSmithTab = false;
@@ -316,11 +318,8 @@ export class DomUI {
     this.refreshMuteBtn();
     // Buffs live under the HP/XP panel so they clear it at any UI scale.
     this.hudEl.querySelector('.fs-hud-left')?.appendChild(this.buffHudEl);
-    this.bossHudEl.innerHTML = `
-      <div class="fs-boss-name" id="boss-name">Boss</div>
-      <div class="fs-boss-track"><div class="fs-boss-fill" id="boss-fill"></div></div>
-      <div class="fs-boss-sub" id="boss-sub"></div>
-    `;
+    this.bossHudEl.innerHTML = `<div class="fs-boss-row" id="boss-row"></div>`;
+    this.bossHudStructKey = '';
     this.bannerEl.innerHTML = `
       <div class="fs-banner-head">
         <span class="fs-banner-ico hidden" id="banner-ico"></span>
@@ -450,54 +449,87 @@ export class DomUI {
     }
   }
 
+  /**
+   * One or more active bosses — horizontal cards (portrait + bar),
+   * with move chips stacked under each card.
+   */
   updateBossHud(
-    boss: {
+    bosses: {
+      uid: number;
+      species: string;
+      variant?: string;
       name: string;
       hp: number;
       maxHp: number;
+      trueBoss?: boolean;
       element?: string | null;
       bossMoves?: BossAbilityId[];
       elemMoves?: string[];
-      sub?: string;
-    } | null,
+    }[],
   ) {
-    if (!boss || boss.hp <= 0) {
+    const live = bosses.filter((b) => b.hp > 0 && b.maxHp > 0);
+    if (!live.length) {
       this.bossHudEl.classList.add('hidden');
+      this.bossHudStructKey = '';
       return;
     }
     this.bossHudEl.classList.remove('hidden');
-    const name = this.bossHudEl.querySelector('#boss-name');
-    const fill = this.bossHudEl.querySelector('#boss-fill') as HTMLElement | null;
-    const sub = this.bossHudEl.querySelector('#boss-sub');
-    if (name) {
-      const elGlyph = boss.element ? this.elementGlyph(boss.element) : '';
-      if (elGlyph) {
-        name.innerHTML =
-          `<span class="fs-boss-el">${elGlyph}</span><span>${boss.name}</span>`;
-      } else {
-        name.textContent = boss.name;
-      }
-    }
-    if (fill) fill.style.width = `${Math.max(0, Math.min(1, boss.hp / boss.maxHp)) * 100}%`;
-    if (sub) {
-      if (boss.sub != null) {
-        sub.textContent = boss.sub;
-      } else {
-        // Icon chips for signature + elemental moves (telegraph the kit).
-        const chips: string[] = [];
-        if (boss.bossMoves?.length) {
-          for (const id of boss.bossMoves) chips.push(this.bossMoveChipHtml(id));
-        }
-        if (boss.elemMoves?.length) {
-          for (const id of boss.elemMoves) {
-            const chip = this.elemMoveChipHtml(id);
-            if (chip) chips.push(chip);
+    this.bossHudEl.classList.toggle('fs-boss-multi', live.length > 1);
+    this.bossHudEl.classList.toggle('fs-boss-solo', live.length === 1);
+
+    const structKey = live
+      .map(
+        (b) =>
+          `${b.uid}|${b.species}|${b.variant || ''}|${b.name}|${b.trueBoss ? 1 : 0}|${b.element || ''}|${(b.bossMoves || []).join(',')}|${(b.elemMoves || []).join(',')}`,
+      )
+      .join(';');
+
+    const row = this.bossHudEl.querySelector('#boss-row');
+    if (!row) return;
+
+    if (structKey !== this.bossHudStructKey) {
+      this.bossHudStructKey = structKey;
+      row.innerHTML = live
+        .map((b) => {
+          const elGlyph = b.element ? this.elementGlyph(b.element) : '';
+          const portrait =
+            animalIconHtml(b.species, b.variant || 'basic', 56) ||
+            `<span class="fs-boss-portrait-fallback">${(b.name || '?').slice(0, 1)}</span>`;
+          const chips: string[] = [];
+          if (b.bossMoves?.length) {
+            for (const id of b.bossMoves) chips.push(this.bossMoveChipHtml(id));
           }
-        }
-        sub.innerHTML = chips.length
-          ? `<div class="fs-boss-moves">${chips.join('')}</div>`
-          : `${Math.ceil(boss.hp)} / ${Math.ceil(boss.maxHp)}`;
-      }
+          if (b.elemMoves?.length) {
+            for (const id of b.elemMoves) {
+              const chip = this.elemMoveChipHtml(id);
+              if (chip) chips.push(chip);
+            }
+          }
+          const mods = chips.length
+            ? `<div class="fs-boss-moves">${chips.join('')}</div>`
+            : `<div class="fs-boss-hp-label" data-boss-hp="${b.uid}"></div>`;
+          return `<article class="fs-boss-card${b.trueBoss ? ' true' : ''}" data-boss-uid="${b.uid}">
+            <div class="fs-boss-card-main">
+              <div class="fs-boss-portrait">${portrait}</div>
+              <div class="fs-boss-meta">
+                <div class="fs-boss-name">${elGlyph ? `<span class="fs-boss-el">${elGlyph}</span>` : ''}<span>${b.name}</span></div>
+                <div class="fs-boss-track"><div class="fs-boss-fill" data-boss-fill="${b.uid}"></div></div>
+              </div>
+            </div>
+            <div class="fs-boss-mods">${mods}</div>
+          </article>`;
+        })
+        .join('');
+    }
+
+    for (const b of live) {
+      const frac = Math.max(0, Math.min(1, b.hp / b.maxHp));
+      const fill = this.bossHudEl.querySelector(
+        `[data-boss-fill="${b.uid}"]`,
+      ) as HTMLElement | null;
+      if (fill) fill.style.width = `${frac * 100}%`;
+      const hpLabel = this.bossHudEl.querySelector(`[data-boss-hp="${b.uid}"]`);
+      if (hpLabel) hpLabel.textContent = `${Math.ceil(b.hp)} / ${Math.ceil(b.maxHp)}`;
     }
   }
 
@@ -3490,7 +3522,7 @@ export class DomUI {
         ? 'Victory!'
         : stats.reason === 'camp'
           ? 'Camp Destroyed!'
-          : 'You Fainted!';
+          : 'You were killed!';
     const timeLabel =
       stats.time != null ? `${formatTime(stats.time)} (day ${stats.day})` : `Day ${stats.day}`;
     const rows: [string, string | number][] = [
@@ -3513,9 +3545,10 @@ export class DomUI {
       stats.totalCredits != null
         ? ` · Wallet: ${formatNum(stats.totalCredits)}`
         : '';
-    const winClass = stats.reason === 'win' ? ' fs-go-win' : '';
+    const outcomeClass =
+      stats.reason === 'win' ? ' fs-go-win' : ' fs-go-dead';
     this.gameOverEl.innerHTML = `
-      <div class="fs-panel fs-modal interactive${winClass}">
+      <div class="fs-panel fs-modal interactive${outcomeClass}">
         <h2>${title}</h2>
         <div class="fs-go-stats">
           ${rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}

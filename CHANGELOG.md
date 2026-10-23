@@ -2,6 +2,15 @@
 
 All notable changes to Forest Survivor are documented here.
 
+## 0.2.8-alpha-build
+
+### Boss HUD
+- Multiple active bosses show as a top-row of cards (portrait, name, pointed HP bar)
+- Signature / elemental move chips stack under each boss’s own card
+
+### Polish
+- Death screen title: **You were killed!** (red)
+
 ## 0.2.7-alpha-build
 
 ### Vanilla mutator

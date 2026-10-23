@@ -437,36 +437,103 @@ body {
   text-shadow: 0 2px 0 rgba(30, 20, 5, 0.8);
 }
 
-/* boss hud */
+/* boss hud — top row of cards (solo or multi), mods stack under each bar */
 .fs-boss-hud {
   position: fixed;
-  bottom: 52px;
+  top: 4.25rem;
   left: 50%;
   transform: translateX(-50%);
-  width: min(640px, 88vw);
+  width: min(1100px, 96vw);
   z-index: 12;
   pointer-events: none;
-  text-align: center;
+}
+.fs-boss-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+.fs-boss-card {
+  flex: 1 1 12.5rem;
+  max-width: min(22rem, 92vw);
+  min-width: 11rem;
+  padding: 0.4rem 0.55rem 0.45rem;
+  background: linear-gradient(180deg, rgba(36, 24, 14, 0.94), rgba(18, 12, 8, 0.96));
+  border: 2px solid #c9a227;
+  border-radius: 0.45rem;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 230, 160, 0.12);
+}
+.fs-boss-card.true {
+  border-color: #e8c04a;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 14px rgba(255, 77, 109, 0.22);
+}
+.fs-boss-solo .fs-boss-card {
+  flex: 0 1 28rem;
+  max-width: min(36rem, 92vw);
+}
+.fs-boss-card-main {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.fs-boss-portrait {
+  flex: none;
+  width: 3.1rem;
+  height: 3.1rem;
+  border-radius: 50%;
+  overflow: hidden;
+  background: radial-gradient(circle at 35% 30%, #3a2a18, #1a120c 70%);
+  border: 2px solid #c9a227;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+}
+.fs-boss-portrait img,
+.fs-boss-portrait .fs-glossary-animal {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  image-rendering: auto;
+}
+.fs-boss-portrait-fallback {
+  font-weight: 900;
+  font-size: 1.25rem;
+  color: #ffe08a;
+}
+.fs-boss-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
 }
 .fs-boss-name {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.35em;
-  font-size: 1.125rem;
+  gap: 0.3em;
+  font-size: 0.82rem;
   font-weight: 900;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #ffe0e8;
-  text-shadow: 0 2px 0 #4a1020, 0 0 12px rgba(255, 60, 90, 0.45);
-  margin-bottom: 6px;
+  color: #fff4e4;
+  text-shadow: 0 2px 0 #2a1808;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.fs-boss-solo .fs-boss-name {
+  font-size: 1.05rem;
 }
 .fs-boss-el {
   display: inline-flex;
   width: 1em;
   height: 1em;
   flex-shrink: 0;
-  filter: drop-shadow(0 1px 0 #4a1020);
+  filter: drop-shadow(0 1px 0 #2a1808);
 }
 .fs-boss-el svg {
   width: 100%;
@@ -474,12 +541,17 @@ body {
   display: block;
 }
 .fs-boss-track {
-  height: 18px;
-  border-radius: 3px;
-  background: rgba(20, 8, 12, 0.88);
-  border: 2px solid #8a2038;
-  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.45);
+  position: relative;
+  height: 0.85rem;
+  background: rgba(10, 6, 4, 0.92);
+  border: 1.5px solid #5a3a1a;
+  border-radius: 2px 0 0 2px;
+  clip-path: polygon(0 0, calc(100% - 0.45rem) 0, 100% 50%, calc(100% - 0.45rem) 100%, 0 100%);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.55);
   overflow: hidden;
+}
+.fs-boss-solo .fs-boss-track {
+  height: 1rem;
 }
 .fs-boss-fill {
   height: 100%;
@@ -487,21 +559,23 @@ body {
   background: linear-gradient(#ff6b7a, #c81e3a 55%, #7a1024);
   transition: width 0.12s linear;
 }
-.fs-boss-sub {
-  margin-top: 4px;
-  font-size: 0.75rem;
+.fs-boss-mods {
+  margin-top: 0.35rem;
+  min-height: 0;
+}
+.fs-boss-hp-label {
+  font-size: 0.68rem;
   font-weight: 800;
-  color: rgba(255, 210, 220, 0.85);
-  line-height: 1.25;
-  max-width: 100%;
-  overflow-wrap: anywhere;
+  color: rgba(255, 224, 200, 0.75);
+  text-align: left;
 }
 
 .fs-boss-moves {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3em;
-  justify-content: center;
+  gap: 0.28em;
+  justify-content: flex-start;
+  align-content: flex-start;
 }
 
 .fs-boss-move {
@@ -510,7 +584,7 @@ body {
   gap: 0.28em;
   padding: 0.12em 0.4em 0.12em 0.22em;
   border-radius: 0.35em;
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 900;
   letter-spacing: 0.02em;
   color: #fff;
@@ -532,6 +606,23 @@ body {
 }
 .fs-boss-move-name {
   line-height: 1;
+}
+
+@media (max-width: 700px) {
+  .fs-boss-hud {
+    top: 5.5rem;
+  }
+  .fs-boss-card {
+    flex-basis: calc(50% - 0.4rem);
+    min-width: 9.5rem;
+  }
+  .fs-boss-portrait {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+  .fs-boss-name {
+    font-size: 0.72rem;
+  }
 }
 .fs-species-pills {
   display: inline-flex;
@@ -587,6 +678,11 @@ body {
 .fs-go-win h2 {
   color: #ffe08a;
   text-shadow: 0 3px 0 #5a3a06;
+}
+
+.fs-go-dead h2 {
+  color: #ff5a5f;
+  text-shadow: 0 3px 0 #5a1214;
 }
 
 /* buff hud — sits under .fs-status inside .fs-hud-left */

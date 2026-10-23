@@ -1502,7 +1502,10 @@ export class RunScene extends Phaser.Scene {
   }
 
   private syncBossHud() {
-    let boss: {
+    const bosses: {
+      uid: number;
+      species: string;
+      variant?: string;
       name: string;
       hp: number;
       maxHp: number;
@@ -1510,10 +1513,13 @@ export class RunScene extends Phaser.Scene {
       element?: string | null;
       bossMoves?: BossAbilityId[];
       elemMoves?: string[];
-    } | null = null;
+    }[] = [];
     for (const a of this.animals.animals) {
-      if (a.dead || !a.boss) continue;
-      const candidate = {
+      if (a.dead || !a.boss || a.hp <= 0) continue;
+      bosses.push({
+        uid: a.uid,
+        species: a.species,
+        variant: a.variant,
         name: a.displayName || BOSS_NAMES[a.species] || a.species,
         hp: a.hp,
         maxHp: a.maxHp,
@@ -1521,10 +1527,15 @@ export class RunScene extends Phaser.Scene {
         element: a.element,
         bossMoves: a.trueBoss && a.bossMoves?.length ? a.bossMoves : undefined,
         elemMoves: a.elemMoves?.length ? a.elemMoves : undefined,
-      };
-      if (!boss || (a.trueBoss && !boss.trueBoss) || a.hp > boss.hp) boss = candidate;
+      });
     }
-    this.ui.updateBossHud(boss);
+    // True bosses first, then highest max HP — stable left→right order.
+    bosses.sort((p, q) => {
+      if (!!q.trueBoss !== !!p.trueBoss) return q.trueBoss ? 1 : -1;
+      if (q.maxHp !== p.maxHp) return q.maxHp - p.maxHp;
+      return p.uid - q.uid;
+    });
+    this.ui.updateBossHud(bosses);
   }
 
   updatePlayer(dt: number) {

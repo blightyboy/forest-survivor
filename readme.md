@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.2.7-alpha-build`
+Version: `0.2.8-alpha-build`
 
 A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + Vite, packaged with Electron. Play as a lumberjack in a hostile forest: chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids.
 
@@ -56,7 +56,7 @@ Optional **run mutators** on the main menu (Savage, No Grace, Glass, Siege, Scar
 
 Optional **win goals**: Endless, Easy (6 nights), Medium (12), Hard (18). Survive the final gauntlet night for a badge and bonus credits. Mid-run **checkpoints** save at dusk/dawn/pause; pause **Save & Quit** keeps Continue available.
 
-**Raid telegraphs** show wave species (animal icons + pills). Boss and elemental moves, power-ups, elements, mutators, and major banners reuse the same **glossary icons** in-run.
+**Raid telegraphs** show wave species (animal icons + pills). Active bosses use a top **multi-card HP HUD** (portrait + bar; move chips under each card). Boss and elemental moves, power-ups, elements, mutators, and major banners reuse the same **glossary icons** in-run.
 
 ### Opening grace
 
