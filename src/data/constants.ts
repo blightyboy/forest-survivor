@@ -67,35 +67,134 @@ export type UpgradeDef = {
   value: (s: any) => string;
   requires?: (L: Record<string, number>) => boolean;
   reqText?: string;
+  /** Nest under this parent id in the Build accordion. */
+  parent?: string;
+  /** Parent row shows a chevron when it has children. */
+  expandable?: boolean;
 };
+
+/** Top-level Build rows (parents + flat walls). Children nest via `parent`. */
+export const BUILD_PARENT_IDS = [
+  'camp', 'walls', 'towers', 'campfire', 'mill', 'mine', 'butcher', 'blacksmith',
+] as const;
 
 export const UPGRADES: UpgradeDef[] = [
   { id: 'camp', kind: 'base', name: 'Camp', desc: 'Sturdier cabin. Passively yields wood, meat and gold', base: { wood: 18, meat: 6, gold: 4 }, growth: 1.65, max: 12,
+    expandable: true,
     value: (s) => s.campHp + ' HP  ' + s.campWood + 'w ' + s.campMeat + 'm ' + s.campGold + 'g' },
+  { id: 'predators_bait', kind: 'risk', name: "Predator's Bait", desc: '+35% enemy XP. Risk: beasts move 20% faster and hunt you harder', base: { wood: 120, meat: 90, gold: 160 }, growth: 1, max: 1,
+    parent: 'camp',
+    value: (s) => (s.predatorsBait ? 'Active' : 'Off'),
+    requires: (L) => (L.camp || 0) >= 1, reqText: 'Upgrade Camp first' },
+  { id: 'forest_beckons', kind: 'risk', name: 'The Forest Beckons', desc: '+20% damage & attack speed. Risk: a stronger wave every minute', base: { wood: 130, meat: 80, gold: 175 }, growth: 1, max: 1,
+    parent: 'camp',
+    value: (s) => (s.forestBeckons ? 'Active' : 'Off'),
+    requires: (L) => (L.camp || 0) >= 1, reqText: 'Upgrade Camp first' },
+  { id: 'cursed_totem', kind: 'risk', name: 'Cursed Totem', desc: '+50% kill resources. Risk: slain foes drop poison/slow totems', base: { wood: 110, meat: 120, gold: 150 }, growth: 1, max: 1,
+    parent: 'camp',
+    value: (s) => (s.cursedTotem ? 'Active' : 'Off'),
+    requires: (L) => (L.camp || 0) >= 1, reqText: 'Upgrade Camp first' },
+
   { id: 'walls', kind: 'base', name: 'Palisade', desc: 'Square wall that stops raiders', base: { wood: 22, meat: 5, gold: 2 }, growth: 1.55, max: 12,
     value: (s) => (s.wallHp ? s.wallHp + ' HP' : 'None') },
+
   { id: 'towers', kind: 'base', name: 'Watchtower', desc: 'Archer tower that shoots threats', base: { wood: 24, meat: 7, gold: 7 }, growth: 1.55, max: 8,
+    expandable: true,
     value: (s) => s.towerCount + '/8 built' },
   { id: 'archers', kind: 'base', name: 'Archers', desc: 'Tower arrow damage & range', base: { wood: 8, meat: 10, gold: 6 }, growth: 1.45, max: 15,
+    parent: 'towers',
     value: (s) => s.arrowDmg + ' dmg · ' + Math.round(s.towerRange) + ' rng',
     requires: (L) => L.towers > 0, reqText: 'Build a tower first' },
   { id: 'barrage', kind: 'base', name: 'Barrage', desc: 'Tower fire rate', base: { wood: 12, meat: 8, gold: 8 }, growth: 1.5, max: 12,
+    parent: 'towers',
     value: (s) => s.fireRate.toFixed(1) + '/s',
     requires: (L) => L.towers > 0, reqText: 'Build a tower first' },
   { id: 'volley', kind: 'base', name: 'Volley', desc: 'Each tower shoots more targets at once', base: { wood: 16, meat: 10, gold: 10 }, growth: 1.65, max: 5,
+    parent: 'towers',
     value: (s) => s.towerTargets + ' target' + (s.towerTargets > 1 ? 's' : ''),
     requires: (L) => L.towers > 0, reqText: 'Build a tower first' },
+
   { id: 'campfire', kind: 'base', name: 'Campfire', desc: 'Heals you inside the camp', base: { wood: 10, meat: 8, gold: 2 }, growth: 1.55, max: 6,
+    expandable: true,
     value: (s) => s.healRate.toFixed(1) + ' HP/s' },
-  { id: 'mill', kind: 'base', name: 'Lumber Mill', desc: 'Cuts lumber every 10s', base: { wood: 12, meat: 10, gold: 8 }, growth: 1.55, max: 12,
-    value: (s) => (s.millWood ? s.millWood + ' wood' : 'None') },
-  { id: 'mine', kind: 'base', name: 'Gold Mine', desc: 'Digs gold every 10s', base: { wood: 30, meat: 10, gold: 3 }, growth: 1.55, max: 12,
-    value: (s) => (s.mineGold ? s.mineGold + ' gold' : 'None') },
-  { id: 'butcher', kind: 'base', name: 'Butcher', desc: 'Prepares meat every 10s', base: { wood: 24, meat: 3, gold: 7 }, growth: 1.5, max: 12,
-    value: (s) => (s.butcherMeat ? s.butcherMeat + ' meat' : 'None') },
+  { id: 'warm_embers', kind: 'sub', name: 'Warm Embers', desc: '+10% heal rate per level', base: { wood: 8, meat: 6, gold: 4 }, growth: 1.5, max: 5,
+    parent: 'campfire',
+    value: (s) => '+' + Math.round(((s.warmEmbersMul || 1) - 1) * 100) + '% heal' },
+  { id: 'guardian_flame', kind: 'sub', name: 'Guardian Flame', desc: '−4% damage taken in camp per level (20% at max)', base: { wood: 10, meat: 8, gold: 6 }, growth: 1.55, max: 5,
+    parent: 'campfire',
+    value: (s) => (s.guardianFlameDr > 0 ? '−' + Math.round(s.guardianFlameDr * 100) + '% in camp' : 'None') },
+  { id: 'eternal_fire', kind: 'sub', name: 'Eternal Fire', desc: 'Heal outside camp at half rate in an expanded radius', base: { wood: 28, meat: 18, gold: 22 }, growth: 1, max: 1,
+    parent: 'campfire',
+    value: (s) => (s.eternalFire ? 'Half heal outside' : 'Off'),
+    requires: (L) =>
+      (L.campfire || 0) >= 6 && (L.warm_embers || 0) >= 1 && (L.guardian_flame || 0) >= 1,
+    reqText: 'Campfire 6/6 + Warm Embers & Guardian Flame' },
+
+  { id: 'mill', kind: 'base', name: 'Lumber Mill', desc: 'Cuts lumber on a timer', base: { wood: 12, meat: 10, gold: 8 }, growth: 1.55, max: 12,
+    expandable: true,
+    value: (s) => (s.millWood ? s.millWood + ' wood / ' + s.millInterval.toFixed(0) + 's' : 'None') },
+  { id: 'efficient_logging', kind: 'sub', name: 'Efficient Logging', desc: '+10% mill yield per level (50% at max)', base: { wood: 14, meat: 8, gold: 10 }, growth: 1.5, max: 5,
+    parent: 'mill',
+    value: (s) => '+' + Math.round(((s.millYieldMul || 1) - 1) * 100) + '% wood',
+    requires: (L) => (L.mill || 0) > 0, reqText: 'Build a mill first' },
+  { id: 'improved_blades', kind: 'sub', name: 'Improved Blades', desc: '−1s mill wait per level (10s → 5s)', base: { wood: 16, meat: 10, gold: 12 }, growth: 1.55, max: 5,
+    parent: 'mill',
+    value: (s) => s.millInterval.toFixed(0) + 's cycle',
+    requires: (L) => (L.mill || 0) > 0, reqText: 'Build a mill first' },
+
+  { id: 'mine', kind: 'base', name: 'Gold Mine', desc: 'Digs gold on a timer', base: { wood: 30, meat: 10, gold: 3 }, growth: 1.55, max: 12,
+    expandable: true,
+    value: (s) => (s.mineGold ? s.mineGold + ' gold / ' + s.mineInterval.toFixed(0) + 's' : 'None') },
+  { id: 'deep_veins', kind: 'sub', name: 'Deep Veins', desc: '+10% mine yield per level (50% at max)', base: { wood: 18, meat: 8, gold: 8 }, growth: 1.5, max: 5,
+    parent: 'mine',
+    value: (s) => '+' + Math.round(((s.mineYieldMul || 1) - 1) * 100) + '% gold',
+    requires: (L) => (L.mine || 0) > 0, reqText: 'Build a mine first' },
+  { id: 'reinforced_pickaxes', kind: 'sub', name: 'Reinforced Pickaxes', desc: '−1s mine wait per level (10s → 5s)', base: { wood: 20, meat: 10, gold: 10 }, growth: 1.55, max: 5,
+    parent: 'mine',
+    value: (s) => s.mineInterval.toFixed(0) + 's cycle',
+    requires: (L) => (L.mine || 0) > 0, reqText: 'Build a mine first' },
+
+  { id: 'butcher', kind: 'base', name: 'Butcher', desc: 'Prepares meat on a timer', base: { wood: 24, meat: 3, gold: 7 }, growth: 1.5, max: 12,
+    expandable: true,
+    value: (s) => (s.butcherMeat ? s.butcherMeat + ' meat / ' + s.butcherInterval.toFixed(0) + 's' : 'None') },
+  { id: 'prime_cuts', kind: 'sub', name: 'Prime Cuts', desc: '+10% butcher yield per level (50% at max)', base: { wood: 14, meat: 6, gold: 10 }, growth: 1.5, max: 5,
+    parent: 'butcher',
+    value: (s) => '+' + Math.round(((s.butcherYieldMul || 1) - 1) * 100) + '% meat',
+    requires: (L) => (L.butcher || 0) > 0, reqText: 'Build a butcher first' },
+  { id: 'skilled_butchery', kind: 'sub', name: 'Skilled Butchery', desc: '−1s butcher wait per level (10s → 5s)', base: { wood: 16, meat: 8, gold: 12 }, growth: 1.55, max: 5,
+    parent: 'butcher',
+    value: (s) => s.butcherInterval.toFixed(0) + 's cycle',
+    requires: (L) => (L.butcher || 0) > 0, reqText: 'Build a butcher first' },
+
   { id: 'blacksmith', kind: 'base', name: 'Blacksmith', desc: 'Sells random gear. Stock refreshes every 5 min', base: { wood: 40, meat: 12, gold: 18 }, growth: 1.7, max: 6,
+    expandable: true,
     value: (s) => (s.forgeLevel ? 'Forge Lv ' + s.forgeLevel + ' · better stock' : 'Closed') },
+  { id: 'sharpened_weapons', kind: 'sub', name: 'Sharpened Weapons', desc: '+5% weapon damage per level', base: { wood: 20, meat: 10, gold: 16 }, growth: 1.55, max: 5,
+    parent: 'blacksmith',
+    value: (s) => '+' + Math.round((s.smithDmgMul - 1) * 100) + '% dmg',
+    requires: (L) => (L.blacksmith || 0) > 0, reqText: 'Build a blacksmith first' },
+  { id: 'reinforced_armor', kind: 'sub', name: 'Reinforced Armor', desc: '−2% incoming damage per level', base: { wood: 22, meat: 12, gold: 14 }, growth: 1.55, max: 5,
+    parent: 'blacksmith',
+    value: (s) => (s.smithArmorDr > 0 ? '−' + Math.round(s.smithArmorDr * 100) + '% taken' : 'None'),
+    requires: (L) => (L.blacksmith || 0) > 0, reqText: 'Build a blacksmith first' },
+  { id: 'masterwork_forging', kind: 'sub', name: 'Masterwork Forging', desc: '+1% crit & +2% attack speed per level', base: { wood: 24, meat: 14, gold: 20 }, growth: 1.6, max: 5,
+    parent: 'blacksmith',
+    value: (s) => '+' + Math.round(s.smithCrit * 100) + '% crit · +' + Math.round((s.smithHaste - 1) * 100) + '% AS',
+    requires: (L) => (L.blacksmith || 0) > 0, reqText: 'Build a blacksmith first' },
 ];
+
+export function upgradeChildren(parentId: string): UpgradeDef[] {
+  return UPGRADES.filter((u) => u.parent === parentId);
+}
+
+export function upgradeById(id: string): UpgradeDef | undefined {
+  return UPGRADES.find((u) => u.id === id);
+}
+
+/** Top-level Build rows only (for hotkeys 1–9). */
+export function buildParentUpgrades(): UpgradeDef[] {
+  return UPGRADES.filter((u) => !u.parent);
+}
 
 export function computeStats(L: Record<string, number>, meta: Record<string, number> = {}) {
   const income = 1 + (meta.income || 0);
@@ -103,6 +202,14 @@ export function computeStats(L: Record<string, number>, meta: Record<string, num
   const towerM = 1 + (meta.towerDmg || 0);
   const healM = 1 + (meta.campHeal || 0);
   const scaleInc = (n: number) => (n > 0 ? Math.max(1, Math.round(n * income)) : 0);
+  const warmEmbersMul = 1 + 0.1 * (L.warm_embers || 0);
+  const millYieldMul = 1 + 0.1 * (L.efficient_logging || 0);
+  const mineYieldMul = 1 + 0.1 * (L.deep_veins || 0);
+  const butcherYieldMul = 1 + 0.1 * (L.prime_cuts || 0);
+  const millInterval = Math.max(5, 10 - (L.improved_blades || 0));
+  const mineInterval = Math.max(5, 10 - (L.reinforced_pickaxes || 0));
+  const butcherInterval = Math.max(5, 10 - (L.skilled_butchery || 0));
+  const baseHeal = (2 + 2.5 * (L.campfire || 0)) * healM * warmEmbersMul;
   return {
     campHp: Math.round((300 + 200 * L.camp) * Math.pow(1.12, L.camp)),
     wallHp: L.walls ? Math.round(90 * L.walls * Math.pow(1.16, L.walls - 1) * wallM) : 0,
@@ -111,16 +218,34 @@ export function computeStats(L: Record<string, number>, meta: Record<string, num
     fireRate: 0.85 + 0.22 * (L.barrage || 0) + 0.04 * L.archers,
     towerRange: 360 + 16 * L.archers,
     towerTargets: 1 + (L.volley || 0),
-    healRate: (2 + 2.5 * L.campfire) * healM,
+    healRate: baseHeal,
+    warmEmbersMul,
+    guardianFlameDr: 0.04 * (L.guardian_flame || 0),
+    eternalFire: (L.eternal_fire || 0) > 0,
+    /** Expanded heal radius for Eternal Fire (beyond yard). */
+    eternalHealR: 220 + 40 * (L.campfire || 0),
     lightR: 250 + 28 * L.campfire,
-    millWood: scaleInc(L.mill ? 3 + 6 * L.mill : 0),
-    mineGold: scaleInc(L.mine ? 1 + 3 * L.mine : 0),
-    butcherMeat: scaleInc(L.butcher ? 1 + 2 * L.butcher : 0),
+    millYieldMul,
+    mineYieldMul,
+    butcherYieldMul,
+    millInterval,
+    mineInterval,
+    butcherInterval,
+    millWood: scaleInc(L.mill ? Math.round((3 + 6 * L.mill) * millYieldMul) : 0),
+    mineGold: scaleInc(L.mine ? Math.round((1 + 3 * L.mine) * mineYieldMul) : 0),
+    butcherMeat: scaleInc(L.butcher ? Math.round((1 + 2 * L.butcher) * butcherYieldMul) : 0),
     forgeLevel: L.blacksmith || 0,
+    smithDmgMul: 1 + 0.05 * (L.sharpened_weapons || 0),
+    smithArmorDr: 0.02 * (L.reinforced_armor || 0),
+    smithCrit: 0.01 * (L.masterwork_forging || 0),
+    smithHaste: 1 + 0.02 * (L.masterwork_forging || 0),
     campWood: scaleInc(1 + 2 * L.camp),
     campMeat: scaleInc(L.camp),
     campGold: scaleInc(Math.floor((L.camp + 1) / 2)),
     smithLuck: meta.smithLuck || 0,
+    predatorsBait: (L.predators_bait || 0) > 0,
+    forestBeckons: (L.forest_beckons || 0) > 0,
+    cursedTotem: (L.cursed_totem || 0) > 0,
   };
 }
 

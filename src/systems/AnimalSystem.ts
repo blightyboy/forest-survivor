@@ -4,6 +4,8 @@ import {
   SPECIES,
   rollAnimalVariant,
   variantMult,
+  frenzyMul,
+  ARMORED_DR,
   DAY_BOSS_SPECIES,
   BOSS_NAMES,
   animalFamily,
@@ -25,6 +27,7 @@ import {
   type ElementId,
 } from '../data/constants';
 import { clamp, dist2, rand, compactInPlace, TAU } from '../core/math';
+import { tickDots, type DotStack } from '../core/dot';
 import { cameraWorldBounds } from '../core/renderScale';
 import { STAR_LOOT } from '../data/constants';
 import type { RunPlayer, Pickup, FirePool } from '../run/RunTypes';
@@ -94,7 +97,14 @@ export interface AnimalEntity {
   trueBoss: boolean;
   dayBoss: boolean;
   element: ElementId | null;
-  burns: { dps: number; life: number }[];
+  /** Fire burn DoT (3s ticks; unique, separate from poison). */
+  burns: DotStack[];
+  /** Poison DoT from flasks / nature (3s ticks; unique, separate from burn). */
+  poisons: DotStack[];
+  /** Gate for refreshing burn from a fire pool. */
+  burnPoolCd: number;
+  /** Gate for refreshing poison from an ooze pool. */
+  poisonPoolCd: number;
   slow: number;
   slowT: number;
   /** Flash bomb etc. — freezes movement and attacks while > 0. */
@@ -143,6 +153,8 @@ export interface AnimalEntity {
   bossMoveCd: Record<string, number>;
   inspireT: number;
   inspireMul: number;
+  /** Blessed variant — seconds until next aura pulse. */
+  auraCd: number;
   _abilHit: boolean;
 }
 
@@ -197,6 +209,12 @@ export class AnimalSystem {
   biomeAt: ((x: number, y: number) => BiomeId) | null = null;
   /** Reject spawn points inside the camp yard (legacy spawnInBase). */
   spawnBlocked: (x: number, y: number) => boolean = () => false;
+  /** Mutator: always chase the player; never siege camp. */
+  huntPlayerOnly = false;
+  /** Mutator: kill drops are XP only (no meat/gold/hearts/powerups). */
+  xpOnlyLoot = false;
+  /** Mutator: scale animal attack damage. */
+  enemyDmgMult = 1;
   onDayBoss?: (name: string) => void;
   /** Fired once per animal death after kill bookkeeping (codex / achievements). */
   onBeastKilled?: (a: AnimalEntity) => void;
@@ -369,6 +387,9 @@ export class AnimalSystem {
     if (opts.fromSplit) scale *= 0.7;
     else if (variant === 'demonic') scale *= 1.06;
     else if (variant === 'dire') scale *= 1.04;
+    else if (variant === 'armored') scale *= 1.05;
+    else if (variant === 'frenzied') scale *= 1.02;
+    else if (variant === 'blessed') scale *= 1.03;
 
     let hp = opts.maxHp
       ? opts.maxHp
@@ -378,6 +399,7 @@ export class AnimalSystem {
     );
     if (opts.hpMult) hp = Math.round(hp * opts.hpMult);
     if (opts.dmgMult) dmg = Math.round(dmg * opts.dmgMult);
+    if (this.enemyDmgMult !== 1) dmg = Math.max(1, Math.round(dmg * this.enemyDmgMult));
     const speed =
       sp.chase * (big ? 0.85 : 1) * (boss ? 0.8 : 1) * multSpd * sm.speed * vm.speed * (opts.trueBoss ? 0.95 : 1);
 
@@ -394,7 +416,14 @@ export class AnimalSystem {
       0.5,
       (canvasH - feetPad) / canvasH,
     );
-    const initialState: AnimalState = raider || dayBoss ? 'march' : swarm ? 'chase' : 'wander';
+    const initialState: AnimalState =
+      this.huntPlayerOnly && (raider || dayBoss || swarm)
+        ? 'chase'
+        : raider || dayBoss
+          ? 'march'
+          : swarm
+            ? 'chase'
+            : 'wander';
     const a: AnimalEntity = {
       uid: this.uid++,
       species,
@@ -424,6 +453,9 @@ export class AnimalSystem {
       dayBoss,
       element,
       burns: [],
+      poisons: [],
+      burnPoolCd: 0,
+      poisonPoolCd: 0,
       slow: 0,
       slowT: 0,
       stunT: 0,
@@ -462,6 +494,7 @@ export class AnimalSystem {
       bossMoveCd: {},
       inspireT: 0,
       inspireMul: 1,
+      auraCd: variant === 'blessed' ? rand(0.4, 1.2) : 0,
       _abilHit: false,
     };
     initAnimalAbilities(a, { trueBoss: !!opts.trueBoss });
@@ -475,7 +508,8 @@ export class AnimalSystem {
     // Quantize walk / flash so we don't re-upload a canvas texture every frame.
     const walkFrame = a.moving ? (a.walkTime * 2) | 0 : 0;
     const flashQ = a.flash > 0 ? Math.ceil(a.flash * 16) : 0;
-    const key = `${a.facing}|${walkFrame}|${flashQ}|${a.state}|${a.variant}|${a.boss ? 1 : 0}`;
+    const frenzyHot = a.variant === 'frenzied' && a.hp < a.maxHp * 0.4;
+    const key = `${a.facing}|${walkFrame}|${flashQ}|${a.state}|${a.variant}|${a.boss ? 1 : 0}|${frenzyHot ? 1 : 0}`;
     if (!force && a.drawKey === key) return;
     a.drawKey = key;
     const sp = SPECIES[a.species];
@@ -495,6 +529,7 @@ export class AnimalSystem {
         big: a.big,
         boss: a.boss,
         flash: a.flash,
+        frenzyHot,
         // Unscaled SPECIES metrics — body art + variant rim/spikes share local space under ctx.scale.
         height: sp.height,
         radius: sp.radius,
@@ -547,6 +582,23 @@ export class AnimalSystem {
       if (a.boss) {
         g.fillStyle(0xbe3cff, 0.22);
         g.fillEllipse(a.x, gy, a.radius * 3.4, a.radius * 1.4);
+      }
+      if (a.variant === 'blessed') {
+        g.fillStyle(0xffe066, 0.14);
+        g.fillEllipse(a.x, gy, a.radius * 5.2, a.radius * 2.1);
+        g.lineStyle(1.5, 0xffe066, 0.28);
+        g.strokeEllipse(a.x, gy, a.radius * 5.2, a.radius * 2.1);
+      } else if (a.inspireT > 0 && a.inspireMul > 1) {
+        g.lineStyle(1.5, 0xffe066, 0.22);
+        g.strokeEllipse(a.x, gy, a.radius * 3.6, a.radius * 1.45);
+      }
+      if (a.variant === 'armored') {
+        g.lineStyle(2, 0xb8c8d8, 0.3);
+        g.strokeEllipse(a.x, gy, a.radius * 2.6, a.radius * 1.0);
+      }
+      if (a.variant === 'frenzied' && a.hp < a.maxHp * 0.4) {
+        g.fillStyle(0xff5a20, 0.16);
+        g.fillEllipse(a.x, gy, a.radius * 3.0, a.radius * 1.2);
       }
       g.fillStyle(0x000000, 0.22);
       g.fillEllipse(a.x, gy, (a.radius + 2) * 2.1, a.radius * 0.76);
@@ -827,6 +879,34 @@ export class AnimalSystem {
     this.spawnDayBoss(kind, a.x, a.y, ctx.dayNumber, ctx.threatM);
   }
 
+  /** Forest Beckons risk upgrade — timed hostile wave near camp. */
+  spawnForestBeckonsWave(cx: number, cy: number, wave: number, threatM: number) {
+    const n = Math.min(14, 3 + wave);
+    const threatBoost = Math.max(0.5, threatM) * (1 + 0.18 * wave);
+    const pool: SpeciesId[] =
+      wave >= 6
+        ? ['wolf', 'dire_wolf', 'boar', 'dire_boar', 'bear']
+        : wave >= 3
+          ? ['wolf', 'dire_wolf', 'boar', 'fox']
+          : ['wolf', 'boar', 'fox', 'deer'];
+    this.ensureSpawnSlots(n + 1, { x: cx, y: cy });
+    for (let i = 0; i < n; i++) {
+      if (this.animals.length >= MAX_ANIMALS) break;
+      const spot = this.findEnemySpawn(cx, cy, 380, 620, 24);
+      if (!spot) continue;
+      const species = pool[Math.floor(Math.random() * pool.length)];
+      const a = this.spawn(species, spot.x, spot.y, {
+        threatM: threatBoost,
+        stars: Math.min(12, 1 + Math.floor(wave / 2)),
+        raider: true,
+      });
+      if (a) {
+        a.provoked = true;
+        a.state = 'chase';
+      }
+    }
+  }
+
   /** Ambient wildlife — pool gated by day number + threat, not day/night phase. */
   spawnAmbient(px: number, py: number, threatM: number, dayNumber: number) {
     let ambient = 0;
@@ -1011,6 +1091,7 @@ export class AnimalSystem {
   private hurtPlayer(player: RunPlayer, a: AnimalEntity, amount: number) {
     if (!player.alive || player.invuln > 0) return;
     let dealt = amount * (1 - clamp(player.armor, 0, 0.65));
+    dealt *= 1 - clamp((player.buildArmorDr || 0) + (player.guardianDr || 0), 0, 0.65);
     if (a.element && player.elementResist[a.element]) {
       dealt *= Math.max(0.25, 1 - (player.elementResist[a.element] || 0));
     }
@@ -1058,7 +1139,11 @@ export class AnimalSystem {
     lootMult = 1,
   ): boolean {
     if (a.dead) return false;
-    a.hp -= amount;
+    let dealt = amount;
+    if (a.variant === 'armored' && dealt > 0) {
+      dealt = Math.max(1, Math.round(dealt * (1 - ARMORED_DR)));
+    }
+    a.hp -= dealt;
     a.hitCd = 0.15;
     a.flash = 0.12;
     // Striking wildlife ends their grace — they hunt back.
@@ -1091,46 +1176,49 @@ export class AnimalSystem {
     const tm = ctx.threatM || 0;
     // Legacy onAnimalKilled: animal lootMult × player greed (ps.lootMult).
     const playerLoot = 1 + 0.18 * (this.combat?.arsenal.passives.greed || 0);
-    const lootM = (a.lootMult || 1 + stars * STAR_LOOT) * playerLoot * lootMult;
+    const cursedLoot = player.cursedTotem ? 1.5 : 1;
+    const lootM = (a.lootMult || 1 + stars * STAR_LOOT) * playerLoot * lootMult * cursedLoot;
     const threatLoot = 1 + tm * 0.14;
     const threatXp = 1 + tm * 0.12;
     const fromSplit = !!(a.fromSplit || ctx.fromSplit);
 
     if (this.combat) {
-      // Meat
-      let meat =
-        (a.boss ? 4 : 0) +
-        (a.big ? 2 : 0) +
-        sp.meat[0] +
-        Math.floor(Math.random() * (sp.meat[1] - sp.meat[0] + 1));
-      meat = Math.round(meat * lootM * threatLoot);
-      if (stars >= 3) meat += Math.min(10, stars - 2);
-      if (fromSplit) meat = Math.max(0, Math.floor(meat * 0.35));
-      if (meat > 0) this.combat.spawnPickup('meat', a.x, a.y, meat);
+      if (!this.xpOnlyLoot) {
+        // Meat
+        let meat =
+          (a.boss ? 4 : 0) +
+          (a.big ? 2 : 0) +
+          sp.meat[0] +
+          Math.floor(Math.random() * (sp.meat[1] - sp.meat[0] + 1));
+        meat = Math.round(meat * lootM * threatLoot);
+        if (stars >= 3) meat += Math.min(10, stars - 2);
+        if (fromSplit) meat = Math.max(0, Math.floor(meat * 0.35));
+        if (meat > 0) this.combat.spawnPickup('meat', a.x, a.y, meat);
 
-      // Gold — chance scales with loot/greed/threat; amount always multiplies by lootM.
-      const greedLv = this.combat?.arsenal.passives.greed || 0;
-      const goldChance = Math.min(
-        1,
-        (a.boss ? 1 : Math.max(0.18, sp.goldChance * 1.35)) *
-          (1 + stars * 0.14) *
-          (1 + tm * 0.12) *
-          (1 + 0.12 * greedLv) *
-          Math.min(1.45, Math.sqrt(lootM)),
-      );
-      let gold = Math.random() < goldChance ? Math.max(1, sp.gold) : 0;
-      if (a.big) gold += 2;
-      if (a.boss) gold += 6 + ctx.dayNumber;
-      if (a.raider || a.assault) gold += 1;
-      // Pity: star/threat beasts, or a scrap chance so early wildlife isn't barren.
-      if (gold <= 0 && (stars >= 1 || tm >= 1.0 || Math.random() < 0.28 + tm * 0.05)) {
-        gold = 1;
-      }
-      if (gold > 0) {
-        gold = Math.max(1, Math.round(gold * lootM * threatLoot * 1.2));
-        gold += Math.floor(stars * 0.75) + Math.floor(tm * 0.6) + Math.floor(greedLv * 0.4);
-        if (fromSplit) gold = Math.max(0, Math.floor(gold * 0.35));
-        if (gold > 0) this.combat.spawnPickup('gold', a.x, a.y, Math.max(1, gold));
+        // Gold — chance scales with loot/greed/threat; amount always multiplies by lootM.
+        const greedLv = this.combat?.arsenal.passives.greed || 0;
+        const goldChance = Math.min(
+          1,
+          (a.boss ? 1 : Math.max(0.18, sp.goldChance * 1.35)) *
+            (1 + stars * 0.14) *
+            (1 + tm * 0.12) *
+            (1 + 0.12 * greedLv) *
+            Math.min(1.45, Math.sqrt(lootM)),
+        );
+        let gold = Math.random() < goldChance ? Math.max(1, sp.gold) : 0;
+        if (a.big) gold += 2;
+        if (a.boss) gold += 6 + ctx.dayNumber;
+        if (a.raider || a.assault) gold += 1;
+        // Pity: star/threat beasts, or a scrap chance so early wildlife isn't barren.
+        if (gold <= 0 && (stars >= 1 || tm >= 1.0 || Math.random() < 0.28 + tm * 0.05)) {
+          gold = 1;
+        }
+        if (gold > 0) {
+          gold = Math.max(1, Math.round(gold * lootM * threatLoot * 1.2));
+          gold += Math.floor(stars * 0.75) + Math.floor(tm * 0.6) + Math.floor(greedLv * 0.4);
+          if (fromSplit) gold = Math.max(0, Math.floor(gold * 0.35));
+          if (gold > 0) this.combat.spawnPickup('gold', a.x, a.y, Math.max(1, gold));
+        }
       }
 
       // XP (greed already in playerLoot; gear xpGain applied on collect)
@@ -1143,27 +1231,30 @@ export class AnimalSystem {
           threatXp *
           (a.element ? 1.15 : 1) *
           (a.trueBoss ? 1.35 : 1) *
-          playerLoot,
+          playerLoot *
+          (player.predatorsBait ? 1.35 : 1),
       );
       if (fromSplit) xp = Math.max(1, Math.round(xp * 0.4));
       this.combat.spawnPickup('xp', a.x, a.y, Math.max(1, xp));
 
-      if (!fromSplit) this.combat.rollPowerupDrop(a);
+      if (!this.xpOnlyLoot) {
+        if (!fromSplit) this.combat.rollPowerupDrop(a);
 
-      // Crimson Charm — chance to drop a healing heart (skipped during nukes / splits).
-      if (
-        !fromSplit &&
-        !this.combat.nuking &&
-        player.buffHearts > 0 &&
-        player.alive
-      ) {
-        let heartChance = 0.22;
-        if (a.boss || a.trueBoss) heartChance = 0.55;
-        else if (a.big || a.raider || a.assault) heartChance = 0.32;
-        else if (a.swarm) heartChance = 0.08;
-        heartChance += Math.min(0.2, (a.stars || 0) * 0.015);
-        if (Math.random() < heartChance) {
-          this.combat.spawnPickup('heart', a.x + rand(-6, 6), a.y + rand(-4, 4), 1);
+        // Crimson Charm — chance to drop a healing heart (skipped during nukes / splits).
+        if (
+          !fromSplit &&
+          !this.combat.nuking &&
+          player.buffHearts > 0 &&
+          player.alive
+        ) {
+          let heartChance = 0.22;
+          if (a.boss || a.trueBoss) heartChance = 0.55;
+          else if (a.big || a.raider || a.assault) heartChance = 0.32;
+          else if (a.swarm) heartChance = 0.08;
+          heartChance += Math.min(0.2, (a.stars || 0) * 0.015);
+          if (Math.random() < heartChance) {
+            this.combat.spawnPickup('heart', a.x + rand(-6, 6), a.y + rand(-4, 4), 1);
+          }
         }
       }
     }
@@ -1196,6 +1287,28 @@ export class AnimalSystem {
       }
       if (a.variant === 'demonic') {
         pools.push({ x: a.x, y: a.y, r: 48, dmg: 8, life: 4, dead: false });
+      }
+      // Cursed Totem camp risk — slain foes leave a poison/slow shrine.
+      if (player.cursedTotem && !fromSplit) {
+        this.hazards.push({
+          type: 'totem',
+          x: a.x,
+          y: a.y,
+          r: 70,
+          life: 8,
+          age: 0,
+          delay: 0,
+          dmg: 0,
+          dps: 0,
+          element: 'nature',
+          color: '#6dd46a',
+          hit: false,
+          dead: false,
+          slow: 0.35,
+          slowT: 0.55,
+          poisonDps: 5,
+          poisonT: 4.5,
+        });
       }
     }
     if (!fromSplit) this.tryDayBossFromKill(a, ctx);
@@ -1234,7 +1347,7 @@ export class AnimalSystem {
         y: sy,
         vx,
         vy,
-        dmg: a.dmg * 0.85,
+        dmg: animalEffectiveDamage(a) * 0.85,
         r,
         life: 2.4,
         dead: false,
@@ -1290,7 +1403,8 @@ export class AnimalSystem {
         continue;
       }
       if (player.alive && player.invuln <= 0 && dist2(s.x, s.y, player.x, player.y) < (s.r + 18) ** 2) {
-        const dealt = s.dmg * (1 - clamp(player.armor, 0, 0.65));
+        let dealt = s.dmg * (1 - clamp(player.armor, 0, 0.65));
+        dealt *= 1 - clamp((player.buildArmorDr || 0) + (player.guardianDr || 0), 0, 0.65);
         player.hp -= dealt;
         player.invuln = 0.35;
         Audio.playSfx('hurt');
@@ -1378,7 +1492,7 @@ export class AnimalSystem {
     const camp = this.camp;
     const coreX = camp?.x ?? this.worldCenter.x;
     const coreY = (camp?.y ?? this.worldCenter.y) - 40;
-    const siegeOk = !!(camp && camp.hp > 0);
+    const siegeOk = !this.huntPlayerOnly && !!(camp && camp.hp > 0 && !camp.noCamp);
     const view = cameraWorldBounds(this.scene.cameras.main, 220);
 
     for (const a of this.animals) {
@@ -1391,6 +1505,23 @@ export class AnimalSystem {
         a.inspireT = Math.max(0, a.inspireT - dt);
         if (a.inspireT <= 0) a.inspireMul = 1;
       }
+      // Blessed: pulse an inspiration aura onto nearby beasts.
+      if (a.variant === 'blessed' && !a.leaving) {
+        a.auraCd -= dt;
+        if (a.auraCd <= 0) {
+          a.auraCd = 1.6;
+          const R2 = 200 * 200;
+          a.inspireT = Math.max(a.inspireT, 2.6);
+          a.inspireMul = Math.max(a.inspireMul, 1.22);
+          for (const o of this.animals) {
+            if (o.dead || o === a || o.leaving) continue;
+            if (dist2(a.x, a.y, o.x, o.y) > R2) continue;
+            o.inspireT = Math.max(o.inspireT, 2.6);
+            o.inspireMul = Math.max(o.inspireMul, 1.3);
+          }
+          this.vfx?.ring?.(a.x, a.y, 'rgba(255,224,100,0.7)', 8, 90, 0.35);
+        }
+      }
       for (const id of Object.keys(a.elemMoveCd)) {
         if (a.elemMoveCd[id] > 0) a.elemMoveCd[id] = Math.max(0, a.elemMoveCd[id] - dt);
       }
@@ -1398,21 +1529,37 @@ export class AnimalSystem {
         if (a.bossMoveCd[id] > 0) a.bossMoveCd[id] = Math.max(0, a.bossMoveCd[id] - dt);
       }
 
-      if (a.burns.length) {
-        let burnDmg = 0;
-        for (let i = a.burns.length - 1; i >= 0; i--) {
-          const b = a.burns[i];
-          b.life -= dt;
-          burnDmg += b.dps * dt;
-          if (b.life <= 0) a.burns.splice(i, 1);
-        }
-        if (burnDmg > 0) {
-          a.hp -= burnDmg;
-          if (a.hp <= 0) {
-            this.killAnimal(a, player, pickups, pools, ctx);
-            continue;
-          }
-        }
+      if (a.burnPoolCd > 0) a.burnPoolCd = Math.max(0, a.burnPoolCd - dt);
+      if (a.poisonPoolCd > 0) a.poisonPoolCd = Math.max(0, a.poisonPoolCd - dt);
+      const burnTick = a.burns.length ? tickDots(a.burns, dt) : 0;
+      const poisonTick = a.poisons.length ? tickDots(a.poisons, dt) : 0;
+      if (burnTick > 0) {
+        a.hp -= burnTick;
+        a.flash = Math.max(a.flash, 0.1);
+        this.combat?.onFloatText?.(
+          a.x + rand(-8, 8),
+          a.y - a.radius - 10,
+          String(Math.round(burnTick)),
+          '#ff8a3d',
+          12,
+          { life: 0.55, vy: -22 },
+        );
+      }
+      if (poisonTick > 0) {
+        a.hp -= poisonTick;
+        a.flash = Math.max(a.flash, 0.1);
+        this.combat?.onFloatText?.(
+          a.x + rand(-8, 8),
+          a.y - a.radius - 10,
+          String(Math.round(poisonTick)),
+          '#6dd46a',
+          12,
+          { life: 0.55, vy: -22 },
+        );
+      }
+      if (burnTick + poisonTick > 0 && a.hp <= 0) {
+        this.killAnimal(a, player, pickups, pools, ctx);
+        continue;
       }
       if (a.slowT > 0) {
         a.slowT -= dt;
@@ -1420,7 +1567,9 @@ export class AnimalSystem {
       }
       if (a.stunT > 0) a.stunT = Math.max(0, a.stunT - dt);
       const stunned = a.stunT > 0;
-      const moveMult = stunned ? 0 : 1 - clamp(a.slow, 0, 0.7);
+      let moveMult = stunned ? 0 : 1 - clamp(a.slow, 0, 0.7);
+      if (moveMult > 0) moveMult *= frenzyMul(a, 'speed');
+      if (moveMult > 0 && player.predatorsBait) moveMult *= 1.2;
       const sp = SPECIES[a.species];
 
       // Stunned: freeze in place (no AI / attacks / abilities this frame).
@@ -1475,10 +1624,25 @@ export class AnimalSystem {
       const peaceful = this.graceLeft > 0 && !a.provoked;
       const canHuntPlayer = !peaceful;
       const canSiege = siegeOk && !a.swarm && !peaceful;
-      const playerInAggro = canHuntPlayer && playerLive && dist < aggroR;
+      const bait = !!player.predatorsBait;
+      const aggroMul = bait ? 1.25 : 1;
+      const playerInAggro = canHuntPlayer && playerLive && dist < aggroR * aggroMul;
       const baseInAggro =
         canSiege && cd < aggroR * (a.dayBoss || a.raider || a.boss || a.assault ? 1.6 : 1.2);
-      const preferPlayer = playerInAggro && (!baseInAggro || dist <= cd * 0.92);
+      // Predator's Bait / Vanilla: prefer hunting the player over sieging camp.
+      const preferPlayer = this.huntPlayerOnly
+        ? !!(
+            canHuntPlayer &&
+            playerLive &&
+            (playerInAggro ||
+              a.raider ||
+              a.assault ||
+              a.dayBoss ||
+              a.boss ||
+              a.trueBoss ||
+              a.swarm)
+          )
+        : playerInAggro && (!baseInAggro || dist <= cd * (bait ? 1.4 : 0.92));
 
       // Drop hunt / siege states while grace is active and this beast isn't provoked.
       if (
@@ -1511,7 +1675,12 @@ export class AnimalSystem {
           if (dist < 520) {
             Audio.playSfx(isWolfish(a.species) ? 'growl' : isBearish(a.species) ? 'roar' : 'grunt');
           }
-        } else if (baseInAggro || (!peaceful && (a.raider || a.assault || a.dayBoss))) a.state = 'march';
+        } else if (
+          !this.huntPlayerOnly &&
+          (baseInAggro || (!peaceful && (a.raider || a.assault || a.dayBoss)))
+        ) {
+          a.state = 'march';
+        }
       } else if (a.state === 'march') {
         if (preferPlayer && dist < engageR) {
           a.state = 'chase';
@@ -1555,13 +1724,21 @@ export class AnimalSystem {
         a.stateT -= dt;
         if (a.stateT <= 0) {
           if (preferPlayer && dist < engageR) a.state = 'chase';
-          else if (baseInAggro || (!peaceful && (a.raider || a.assault || a.dayBoss || a.boss))) a.state = 'march';
-          else a.state = playerInAggro ? 'chase' : 'wander';
+          else if (
+            !this.huntPlayerOnly &&
+            (baseInAggro || (!peaceful && (a.raider || a.assault || a.dayBoss || a.boss)))
+          ) {
+            a.state = 'march';
+          } else a.state = playerInAggro ? 'chase' : 'wander';
         }
       } else if (a.state === 'chase') {
         if (!playerLive || dist > engageR + 180) {
-          if (baseInAggro || a.raider || a.assault || a.dayBoss || a.boss) a.state = 'march';
-          else {
+          if (
+            !this.huntPlayerOnly &&
+            (baseInAggro || a.raider || a.assault || a.dayBoss || a.boss)
+          ) {
+            a.state = 'march';
+          } else {
             a.state = 'wander';
             a.stateT = rand(0.5, 1.5);
           }
@@ -1761,6 +1938,25 @@ export class AnimalSystem {
             a.bar.lineStyle(1.4, vcol, 1);
             a.bar.lineBetween(a.x - 3, markY - 3, a.x + 3, markY + 3);
             a.bar.lineBetween(a.x + 3, markY - 3, a.x - 3, markY + 3);
+          } else if (a.variant === 'armored') {
+            a.bar.fillTriangle(a.x, markY - 4, a.x + 3.5, markY - 1, a.x + 3.5, markY + 2);
+            a.bar.fillTriangle(a.x, markY - 4, a.x - 3.5, markY - 1, a.x - 3.5, markY + 2);
+            a.bar.fillTriangle(a.x, markY + 4, a.x + 3.5, markY + 2, a.x - 3.5, markY + 2);
+          } else if (a.variant === 'frenzied') {
+            a.bar.fillTriangle(a.x - 1, markY - 4, a.x + 2, markY, a.x - 2, markY + 1);
+            a.bar.fillTriangle(a.x + 1, markY, a.x + 3, markY + 4, a.x - 1, markY + 2);
+          } else if (a.variant === 'blessed') {
+            a.bar.beginPath();
+            for (let p = 0; p < 10; p++) {
+              const ang = -Math.PI / 2 + (p * Math.PI) / 5;
+              const rr = p % 2 === 0 ? 3.2 : 1.4;
+              const px2 = a.x + Math.cos(ang) * rr;
+              const py2 = markY + Math.sin(ang) * rr;
+              if (p === 0) a.bar.moveTo(px2, py2);
+              else a.bar.lineTo(px2, py2);
+            }
+            a.bar.closePath();
+            a.bar.fillPath();
           } else {
             a.bar.fillCircle(a.x, markY, 2.5);
           }
@@ -1800,7 +1996,8 @@ export class AnimalSystem {
       }
       if (b.life <= 0) b.dead = true;
       if (player.alive && player.invuln <= 0 && dist2(b.x, b.y, player.x, player.y) < (b.r + 14) ** 2) {
-        const dealt = b.dmg * (1 - clamp(player.armor, 0, 0.65));
+        let dealt = b.dmg * (1 - clamp(player.armor, 0, 0.65));
+        dealt *= 1 - clamp((player.buildArmorDr || 0) + (player.guardianDr || 0), 0, 0.65);
         player.hp -= dealt;
         player.invuln = 0.35;
         Audio.playSfx('hurt');

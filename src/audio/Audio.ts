@@ -49,6 +49,65 @@ type NoiseOpts = {
   delay?: number;
 };
 
+/** Default max concurrent plays of the same SFX (anti-chaingun). */
+const DEFAULT_MAX_OVERLAP = 2;
+
+/** Per-SFX caps — spammy combat cues stay low; big one-shots stay unique. */
+const SFX_MAX_OVERLAP: Partial<Record<string, number>> = {
+  hit: 2,
+  chop: 2,
+  throw: 2,
+  bow: 2,
+  pickup: 2,
+  xp: 2,
+  gold: 2,
+  ore: 2,
+  grunt: 2,
+  growl: 1,
+  roar: 1,
+  howl: 1,
+  chitter: 2,
+  boom: 2,
+  hurt: 1,
+  death: 1,
+  levelup: 1,
+  upgrade: 1,
+  horn: 1,
+  build: 1,
+  treeFall: 1,
+  deny: 1,
+  click: 2,
+};
+
+/** Approximate audible length used to free an overlap slot. */
+const SFX_VOICE_DUR: Partial<Record<string, number>> = {
+  chop: 0.12,
+  hit: 0.12,
+  throw: 0.1,
+  bow: 0.1,
+  pickup: 0.1,
+  xp: 0.1,
+  gold: 0.18,
+  ore: 0.1,
+  grunt: 0.22,
+  growl: 0.35,
+  roar: 0.55,
+  howl: 1.4,
+  chitter: 0.22,
+  boom: 0.45,
+  hurt: 0.3,
+  death: 1.1,
+  levelup: 0.7,
+  upgrade: 0.45,
+  horn: 1.0,
+  build: 0.45,
+  treeFall: 0.45,
+  deny: 0.16,
+  click: 0.06,
+  eat: 0.35,
+  boarDie: 0.35,
+};
+
 class AudioManager {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -57,6 +116,8 @@ class AudioManager {
   sfxMuted = false;
   volume = 0.32;
   private lastPlayed: Record<string, number> = Object.create(null);
+  /** Scheduled end times (AudioContext time) of active voices per SFX id. */
+  private voiceEnds: Record<string, number[]> = Object.create(null);
 
   /** Shared Web Audio context (Music unlocks against this). */
   getContext() {
@@ -149,19 +210,39 @@ class AudioManager {
   }
 
   /**
-   * Schedule start time for a voice. Same-frame / rapid repeats stagger by
-   * `minGap` instead of being dropped (axe hitting several trees at once).
+   * Schedule a voice start. Caps concurrent plays of the same SFX, and lightly
+   * staggers same-frame repeats so a few overlapping hits still sound ok.
    */
-  private scheduleVoice(name: string, minGap = 0.028): number | null {
+  private scheduleVoice(name: string, minGap = 0.04): number | null {
     if (!this.ctx || this.muted || this.sfxMuted || this.ctx.state !== 'running') return null;
     const now = this.ctx.currentTime;
+    const maxOverlap = SFX_MAX_OVERLAP[name] ?? DEFAULT_MAX_OVERLAP;
+    const voiceDur = SFX_VOICE_DUR[name] ?? 0.2;
+
+    let ends = this.voiceEnds[name] || [];
+    ends = ends.filter((t) => t > now + 0.001);
+    if (ends.length >= maxOverlap) {
+      this.voiceEnds[name] = ends;
+      return null;
+    }
+
     const last = this.lastPlayed[name];
     let delay = 0;
     if (last !== undefined && now < last + minGap) {
       delay = last + minGap - now;
-      if (delay > 0.18) return null;
+      // Don't queue past the next free slot — drop instead of chaingun.
+      if (delay > minGap * 1.5) {
+        this.voiceEnds[name] = ends;
+        return null;
+      }
     }
-    this.lastPlayed[name] = now + delay;
+
+    const start = now + delay;
+    ends.push(start + voiceDur);
+    // Keep oldest-first; trim if somehow over (paranoia).
+    if (ends.length > maxOverlap) ends = ends.slice(-maxOverlap);
+    this.voiceEnds[name] = ends;
+    this.lastPlayed[name] = start;
     return delay;
   }
 

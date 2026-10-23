@@ -209,14 +209,16 @@ function createWindow() {
   win.webContents.once('did-finish-load', () => {
     setTimeout(() => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
-      updater.checkForUpdates(mainWindow).catch((err) => {
-        console.warn('[updater] check failed:', err && err.message);
-      });
+      // First check + every couple of minutes until an update is found.
+      updater.startPeriodicChecks(mainWindow);
     }, 1200);
   });
 
   win.on('closed', () => {
-    if (mainWindow === win) mainWindow = null;
+    if (mainWindow === win) {
+      updater.stopPeriodicChecks();
+      mainWindow = null;
+    }
   });
 
   if (!app.isPackaged && process.env.FOREST_DEVTOOLS === '1') {

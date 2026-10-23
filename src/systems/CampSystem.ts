@@ -21,6 +21,15 @@ import { Audio } from '../audio/Audio';
 import { settings } from '../meta/Settings';
 import { CanvasSprite } from '../art/draw/CanvasSprite';
 import { drawTowerArrow } from '../art/draw/weaponDraw';
+import {
+  drawBlacksmithBaked,
+  drawButcherBaked,
+  drawCampBaked,
+  drawCampfireBaked,
+  drawMillBaked,
+  drawMineBaked,
+  drawTowerBaked,
+} from '../art/draw/buildingBake';
 
 /** Legacy `Arrow` — homing tower bolt with visible flight. */
 type TowerArrow = {
@@ -60,9 +69,25 @@ type BuildingSlot = {
   x: number;
   y: number;
   solidR: number;
-  sprite: Phaser.GameObjects.Image | null;
+  canvas: CanvasSprite | null;
   levelKey: string;
   badge: Phaser.GameObjects.Text | null;
+};
+
+type TowerVisual = {
+  x: number;
+  y: number;
+  canvas: CanvasSprite;
+  /** Archer facing: +1 right, -1 left. */
+  aim: number;
+};
+
+const BLD_CANVAS: Record<BuildingSlot['id'], { w: number; h: number; pad: number }> = {
+  campfire: { w: 64, h: 66, pad: 12 },
+  mill: { w: 110, h: 80, pad: 8 },
+  mine: { w: 80, h: 72, pad: 6 },
+  butcher: { w: 72, h: 68, pad: 6 },
+  blacksmith: { w: 80, h: 72, pad: 6 },
 };
 
 /** Push a circle out of a solid disc (legacy world.moveEntity solid resolve). */
@@ -95,13 +120,44 @@ export class CampSystem {
     // Legacy: all upgrades start at 0; walls begin at 1 for a basic palisade.
     camp: 0, walls: 1, towers: 0, archers: 0, barrage: 0, volley: 0,
     campfire: 0, mill: 0, mine: 0, butcher: 0, blacksmith: 0,
+    // Campfire subs
+    warm_embers: 0, guardian_flame: 0, eternal_fire: 0,
+    // Mill / mine / butcher subs
+    efficient_logging: 0, improved_blades: 0,
+    deep_veins: 0, reinforced_pickaxes: 0,
+    prime_cuts: 0, skilled_butchery: 0,
+    // Blacksmith subs
+    sharpened_weapons: 0, reinforced_armor: 0, masterwork_forging: 0,
+    // Camp risk one-shots
+    predators_bait: 0, forest_beckons: 0, cursed_totem: 0,
   };
   hp = 300;
   maxHp = 300;
   x: number;
   y: number;
   stats = computeStats(this.levels);
+  /** Cabin passive income timer. */
   incomeT = MILL_INTERVAL;
+  millT = MILL_INTERVAL;
+  mineT = MILL_INTERVAL;
+  butcherT = MILL_INTERVAL;
+  /** Forest Beckons escalating wave timer. */
+  beckonsT = 60;
+  beckonsWave = 0;
+
+  /** Push forge / risk / campfire bonuses onto the player for combat hooks. */
+  syncPlayerBuildBonuses(player: RunPlayer) {
+    const s = this.stats;
+    const inYard = this.contains(player.x, player.y);
+    player.buildDmgMul = (s.smithDmgMul || 1) * (s.forestBeckons ? 1.2 : 1);
+    player.buildArmorDr = s.smithArmorDr || 0;
+    player.buildCritAdd = s.smithCrit || 0;
+    player.buildHasteMul = (s.smithHaste || 1) * (s.forestBeckons ? 1.2 : 1);
+    player.guardianDr = inYard ? (s.guardianFlameDr || 0) : 0;
+    player.predatorsBait = !!s.predatorsBait;
+    player.forestBeckons = !!s.forestBeckons;
+    player.cursedTotem = !!s.cursedTotem;
+  }
   /** Seconds until free forge restock (legacy refreshIn). */
   shopRefreshIn = 0;
   shopStock: (GearItem | null)[] = [];
@@ -121,6 +177,8 @@ export class CampSystem {
   structureHitFlashCd = 0;
   /** Mutator: thinner smith stock (Scarcity). */
   shopStockMult = 1;
+  /** Mutator (Vanilla): no cabin, walls, or buildings — raids still fire. */
+  noCamp = false;
   /** Win-goal night count — when assaultNight matches, run final gauntlet. */
   winGoalNights = 0;
   /** Fired when a true boss spawns (move telegraph — ability ids). */
@@ -142,15 +200,17 @@ export class CampSystem {
   /** Legacy addShake — wired from RunScene (respects Options shakeScale). */
   onShake?: (intensity: number) => void;
   pendingRaidCredit = false;
-  campSprite: Phaser.GameObjects.Image;
+  campCanvas: CanvasSprite;
   yardGfx: Phaser.GameObjects.Graphics;
   /** HP bars for camp + walls (redrawn each frame). */
   overlayGfx: Phaser.GameObjects.Graphics;
   walls: WallSeg[] = [];
-  towers: Phaser.GameObjects.Image[] = [];
+  towers: TowerVisual[] = [];
   towerSlots: { x: number; y: number }[] = [];
   buildings: BuildingSlot[] = [];
   fx: FxSystem | null = null;
+  /** Shared clock for building / flag / flame animations. */
+  private animT = 0;
   /** Floating combat text for tower hits (wired from RunScene). */
   onFloatText?: (
     x: number,
@@ -187,11 +247,8 @@ export class CampSystem {
     this.overlayGfx = scene.add.graphics().setDepth(1_000_000);
     layer.add(this.overlayGfx);
 
-    this.campSprite = scene.add
-      .image(cx, cy, 'camp')
-      .setOrigin(0.5, 1)
-      .setDepth(cy);
-    layer.add(this.campSprite);
+    this.campCanvas = new CanvasSprite(scene, layer, 140, 150, 'rt_camp', 0.5, 1);
+    this.campCanvas.setPosition(cx, cy, cy);
 
     const c = WALL_HALF - TOWER_INSET;
     this.towerSlots = [
@@ -202,14 +259,40 @@ export class CampSystem {
     ];
 
     this.buildings = [
-      { id: 'campfire', x: cx, y: cy + 70, solidR: 16, sprite: null, levelKey: 'campfire', badge: null },
-      { id: 'mill', x: cx - 210, y: cy + 160, solidR: 30, sprite: null, levelKey: 'mill', badge: null },
-      { id: 'mine', x: cx + 210, y: cy + 160, solidR: 28, sprite: null, levelKey: 'mine', badge: null },
-      { id: 'butcher', x: cx + 200, y: cy - 30, solidR: 26, sprite: null, levelKey: 'butcher', badge: null },
-      { id: 'blacksmith', x: cx - 200, y: cy - 30, solidR: 28, sprite: null, levelKey: 'blacksmith', badge: null },
+      { id: 'campfire', x: cx, y: cy + 70, solidR: 16, canvas: null, levelKey: 'campfire', badge: null },
+      { id: 'mill', x: cx - 210, y: cy + 160, solidR: 30, canvas: null, levelKey: 'mill', badge: null },
+      { id: 'mine', x: cx + 210, y: cy + 160, solidR: 28, canvas: null, levelKey: 'mine', badge: null },
+      { id: 'butcher', x: cx + 200, y: cy - 30, solidR: 26, canvas: null, levelKey: 'butcher', badge: null },
+      { id: 'blacksmith', x: cx - 200, y: cy - 30, solidR: 28, canvas: null, levelKey: 'blacksmith', badge: null },
     ];
 
     this.recompute();
+    this.redrawCampVisuals(null);
+  }
+
+  /** Vanilla mutator — strip the base so only the player matters. */
+  enableNoCamp() {
+    this.noCamp = true;
+    this.levels.walls = 0;
+    this.levels.camp = 0;
+    this.levels.towers = 0;
+    this.levels.campfire = 0;
+    this.levels.mill = 0;
+    this.levels.mine = 0;
+    this.levels.butcher = 0;
+    this.levels.blacksmith = 0;
+    this.recompute();
+    this.campCanvas.setVisible(false);
+    this.yardGfx.clear().setVisible(false);
+    this.overlayGfx.clear().setVisible(false);
+    for (const b of this.buildings) {
+      b.canvas?.setVisible(false);
+      b.badge?.setVisible(false);
+    }
+    this.campBadge?.setVisible(false);
+    this.wallBadge?.setVisible(false);
+    // Keep hp > 0 so raid bookkeeping / win checks still work; never lose via cabin.
+    this.hp = this.maxHp = 1;
   }
 
   private makeLevelBadge(x: number, y: number): Phaser.GameObjects.Text {
@@ -255,6 +338,7 @@ export class CampSystem {
   private updateOverlays() {
     const g = this.overlayGfx;
     g.clear();
+    if (this.noCamp) return;
 
     const campScale = 1 + this.levels.camp * 0.035;
     const campY = this.y - 40;
@@ -310,6 +394,7 @@ export class CampSystem {
   }
 
   contains(x: number, y: number, pad = 0) {
+    if (this.noCamp) return false;
     return campContains(this.x, this.y, x, y, pad);
   }
 
@@ -329,6 +414,7 @@ export class CampSystem {
   private drawYard() {
     const g = this.yardGfx;
     g.clear();
+    if (this.noCamp) return;
     const h = WALL_HALF - 8;
     g.fillStyle(0x967648, 0.28);
     g.fillRoundedRect(this.x - h, this.y - h, h * 2, h * 2, 18);
@@ -411,38 +497,96 @@ export class CampSystem {
     while (this.towers.length < want) {
       const i = this.towers.length;
       const slot = this.towerSlots[i];
-      const t = this.scene.add
-        .image(slot.x, slot.y, 'tower')
-        .setOrigin(0.5, 1)
-        .setDepth(slot.y + 3);
-      this.layer.add(t);
-      this.towers.push(t);
+      const canvas = new CanvasSprite(this.scene, this.layer, 72, 130, 'rt_tower', 0.5, 1);
+      canvas.setPosition(slot.x, slot.y, slot.y + 3);
+      this.towers.push({ x: slot.x, y: slot.y, canvas, aim: 1 });
       this.towerTimers.push(0.2);
     }
     while (this.towers.length > want) {
-      this.towers.pop()?.destroy();
+      this.towers.pop()?.canvas.destroy();
       this.towerTimers.pop();
     }
   }
 
   syncBuildings() {
     for (const b of this.buildings) {
+      if (this.noCamp) {
+        b.canvas?.setVisible(false);
+        continue;
+      }
       const lv = this.levels[b.levelKey] || 0;
       // Legacy campfire is always present (level 0 still draws the fire pit).
       const alwaysOn = b.id === 'campfire';
       if (lv > 0 || alwaysOn) {
-        if (!b.sprite) {
-          const key = `bld_${b.id}`;
-          b.sprite = this.scene.add
-            .image(b.x, b.y, key)
-            .setOrigin(0.5, 1)
-            .setDepth(b.y + 2);
-          this.layer.add(b.sprite);
+        if (!b.canvas) {
+          const sz = BLD_CANVAS[b.id];
+          b.canvas = new CanvasSprite(
+            this.scene,
+            this.layer,
+            sz.w,
+            sz.h,
+            `rt_bld_${b.id}`,
+            0.5,
+            1,
+          );
+          b.canvas.setPosition(b.x, b.y, b.y + 2);
         }
-        b.sprite.setVisible(true);
-      } else if (b.sprite) {
-        b.sprite.setVisible(false);
+        b.canvas.setVisible(true);
+      } else if (b.canvas) {
+        b.canvas.setVisible(false);
       }
+    }
+  }
+
+  /** Live redraw: flag, flame, saw, mine hoist, butcher, forge, tower aim. */
+  private redrawCampVisuals(animals: AnimalSystem | null) {
+    if (this.noCamp) return;
+    const t = this.animT;
+    this.campCanvas.clear();
+    this.campCanvas.withFeetOrigin((ctx) => {
+      drawCampBaked(ctx, { time: t, level: this.levels.camp || 0 });
+    }, 10);
+    this.campCanvas.refresh();
+    this.campCanvas.setPosition(this.x, this.y, this.y);
+
+    for (const tw of this.towers) {
+      if (animals) {
+        let bestD2 = Infinity;
+        let bestX = tw.x + tw.aim * 40;
+        for (const a of animals.animals) {
+          if (a.dead) continue;
+          const d2 = dist2(tw.x, tw.y, a.x, a.y);
+          if (d2 < bestD2 && d2 < this.stats.towerRange * this.stats.towerRange) {
+            bestD2 = d2;
+            bestX = a.x;
+          }
+        }
+        const want = bestX >= tw.x ? 1 : -1;
+        if (want !== tw.aim) tw.aim = want;
+      }
+      tw.canvas.clear();
+      tw.canvas.withFeetOrigin((ctx) => {
+        drawTowerBaked(ctx, { time: t, aim: tw.aim });
+      }, 6);
+      tw.canvas.refresh();
+      tw.canvas.setPosition(tw.x, tw.y, tw.y + 3);
+    }
+
+    for (const b of this.buildings) {
+      if (!b.canvas || !b.canvas.image.visible) continue;
+      const lv = this.levels[b.levelKey] || 0;
+      const pad = BLD_CANVAS[b.id].pad;
+      b.canvas.clear();
+      b.canvas.withFeetOrigin((ctx) => {
+        const anim = { time: t, level: lv };
+        if (b.id === 'campfire') drawCampfireBaked(ctx, anim);
+        else if (b.id === 'mill') drawMillBaked(ctx, anim);
+        else if (b.id === 'mine') drawMineBaked(ctx, anim);
+        else if (b.id === 'butcher') drawButcherBaked(ctx, anim);
+        else drawBlacksmithBaked(ctx, anim);
+      }, pad);
+      b.canvas.refresh();
+      b.canvas.setPosition(b.x, b.y, b.y + 2);
     }
   }
 
@@ -453,6 +597,7 @@ export class CampSystem {
     out: { x: number; y: number; r: number; intensity?: number; warm?: boolean }[],
     time: number,
   ) {
+    if (this.noCamp) return;
     const fl = 1 + Math.sin(time * 13) * 0.04 + Math.sin(time * 23) * 0.03;
     const fire = this.buildings.find((b) => b.id === 'campfire');
     if (fire) {
@@ -477,6 +622,7 @@ export class CampSystem {
    * Call alongside collideWalls / World.moveEntity.
    */
   collideStructures(e: { x: number; y: number }, r: number) {
+    if (this.noCamp) return;
     // Quick reject when far from the yard.
     if (Math.max(Math.abs(e.x - this.x), Math.abs(e.y - this.y)) > BASE_HALF + r + 80) return;
     // Camp core (always solid).
@@ -494,7 +640,7 @@ export class CampSystem {
 
   /** Legacy wall segment collision — push entity out of living posts. */
   collideWalls(e: { x: number; y: number }, r: number): WallSeg | null {
-    if (!this.walls.length) return null;
+    if (this.noCamp || !this.walls.length) return null;
     const cheb = Math.max(Math.abs(e.x - this.x), Math.abs(e.y - this.y));
     if (Math.abs(cheb - WALL_HALF) > r + WALL_SOLID_R + 6) return null;
     let touched: WallSeg | null = null;
@@ -518,7 +664,7 @@ export class CampSystem {
   }
 
   damageWall(w: WallSeg, dmg: number) {
-    if (!w.alive || dmg <= 0) return;
+    if (this.noCamp || !w.alive || dmg <= 0) return;
     w.hp -= dmg;
     this.notifyStructureHit();
     for (const s of w.sprites) s.setTint(0xffccaa);
@@ -553,6 +699,7 @@ export class CampSystem {
   }
 
   tryUpgrade(id: string, player: RunPlayer): boolean {
+    if (this.noCamp) return false;
     if (!this.canUpgrade(id)) return false;
     const cost = this.upgradeCost(id);
     for (const k in cost) {
@@ -641,6 +788,7 @@ export class CampSystem {
   }
 
   damage(amount: number) {
+    if (this.noCamp) return false;
     if (amount <= 0) return this.hp <= 0;
     this.hp -= amount;
     this.notifyStructureHit();
@@ -664,11 +812,23 @@ export class CampSystem {
     return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
   }
 
+  /** Spawn focus for raids — player under Vanilla, cabin otherwise. */
+  raidFocus(player?: { x: number; y: number }) {
+    if (this.noCamp && player) return { x: player.x, y: player.y };
+    return { x: this.x, y: this.y };
+  }
+
   /**
    * Legacy startRaid + spawnMiniboss/spawnTrueBoss — call once when night begins.
    * Builds a spawn queue (staggered) and drops the night boss once grace has ended.
    */
-  startNightRaid(dayNumber: number, animals: AnimalSystem, threatM: number, graceLeft = 0) {
+  startNightRaid(
+    dayNumber: number,
+    animals: AnimalSystem,
+    threatM: number,
+    graceLeft = 0,
+    player?: { x: number; y: number },
+  ) {
     if (this.assaultNight === dayNumber && this.raidActive) return;
     if (!this.raidAngles.length) this.prepareRaidFronts(dayNumber);
 
@@ -715,42 +875,62 @@ export class CampSystem {
     }
 
     // Boss leads the night once start-of-run grace ends (retry in update).
-    this.trySpawnNightBoss(animals, threatM, graceLeft);
+    this.trySpawnNightBoss(animals, threatM, graceLeft, player);
   }
 
   /** Spawn (or retry) the night miniboss / true boss. */
-  private trySpawnNightBoss(animals: AnimalSystem, threatM: number, graceLeft = 0) {
+  private trySpawnNightBoss(
+    animals: AnimalSystem,
+    threatM: number,
+    graceLeft = 0,
+    player?: { x: number; y: number },
+  ) {
     if (this.nightBossSpawned) return;
     if (graceLeft > 0) return;
     const dayNumber = this.assaultNight || 1;
     const ww = animals.worldSize.w;
     const wh = animals.worldSize.h;
+    const focus = this.raidFocus(player);
     const gauntlet = this.winGoalNights > 0 && dayNumber === this.winGoalNights;
     if (gauntlet || isBossNight(dayNumber)) {
-      const boss = animals.spawnTrueBoss(dayNumber, threatM, this.x, this.y, ww, wh, this.raidAngles[0]);
+      const boss = animals.spawnTrueBoss(
+        dayNumber,
+        threatM,
+        focus.x,
+        focus.y,
+        ww,
+        wh,
+        this.raidAngles[0],
+      );
       if (!boss) return;
       this.nightBossSpawned = true;
       const moves = [...(boss.bossMoves || [])];
       this.onTrueBossSpawn?.(boss.displayName || boss.species, moves);
       if (gauntlet) {
         // Extra miniboss escorts for the finish-line night.
-        animals.spawnMiniboss(dayNumber, threatM * 1.1, this.x, this.y, ww, wh, this.raidAngles);
+        animals.spawnMiniboss(dayNumber, threatM * 1.1, focus.x, focus.y, ww, wh, this.raidAngles);
         if (dayNumber >= 12) {
-          animals.spawnMiniboss(dayNumber, threatM * 1.15, this.x, this.y, ww, wh, this.raidAngles);
+          animals.spawnMiniboss(dayNumber, threatM * 1.15, focus.x, focus.y, ww, wh, this.raidAngles);
         }
       }
     } else {
-      const n = animals.spawnMiniboss(dayNumber, threatM, this.x, this.y, ww, wh, this.raidAngles);
+      const n = animals.spawnMiniboss(dayNumber, threatM, focus.x, focus.y, ww, wh, this.raidAngles);
       if (!n) return;
       this.nightBossSpawned = true;
     }
   }
 
   /** Drain the night raid queue (legacy updateRaid). */
-  updateNightRaid(dt: number, animals: AnimalSystem, threatM: number, graceLeft = 0) {
+  updateNightRaid(
+    dt: number,
+    animals: AnimalSystem,
+    threatM: number,
+    graceLeft = 0,
+    player?: { x: number; y: number },
+  ) {
     if (!this.raidActive) return;
     // Boss first — never let the animal soft-cap eat the night lead.
-    if (!this.nightBossSpawned) this.trySpawnNightBoss(animals, threatM, graceLeft);
+    if (!this.nightBossSpawned) this.trySpawnNightBoss(animals, threatM, graceLeft, player);
     if (!this.raidQueue.length) return;
     this.raidSpawnT -= dt;
     if (this.raidSpawnT > 0) return;
@@ -759,10 +939,11 @@ export class CampSystem {
     if (!spec) return;
     const angles = this.raidAngles.length ? this.raidAngles : [-Math.PI / 2];
     const angle = angles[(this.raidQueue.length - 1) % angles.length];
+    const focus = this.raidFocus(player);
     const spawned = animals.spawnRaidMember(
       spec.species,
-      this.x,
-      this.y,
+      focus.x,
+      focus.y,
       angle,
       threatM,
       !!spec.big,
@@ -796,12 +977,17 @@ export class CampSystem {
     let reward: { wood: number; gold: number } | null = null;
     if (this.hp > 0) {
       player.raidsSurvived++;
-      const wave = this.assaultNight || 1;
-      const gold = 4 + 3 * wave;
-      const wood = 10 * wave;
-      gainResource(player, 'gold', gold);
-      gainResource(player, 'wood', wood);
-      reward = { wood, gold };
+      if (!this.noCamp) {
+        const wave = this.assaultNight || 1;
+        const gold = 4 + 3 * wave;
+        const wood = 10 * wave;
+        gainResource(player, 'gold', gold);
+        gainResource(player, 'wood', wood);
+        reward = { wood, gold };
+      } else {
+        // Vanilla: survival still counts; XP payout is handled by RunScene.
+        reward = { wood: 0, gold: 0 };
+      }
     }
     this.pendingRaidCredit = false;
     this.assaultNight = null;
@@ -829,15 +1015,59 @@ export class CampSystem {
     graceLeft: number,
     onRaid: () => void,
   ) {
+    if (this.noCamp) {
+      // Raids still fire; no structures, income, or collision.
+      if (isNight) {
+        if (!this.raidActive && this.assaultNight !== dayNumber) {
+          this.startNightRaid(dayNumber, animals, threatM, graceLeft, player);
+          onRaid();
+        }
+        this.updateNightRaid(dt, animals, threatM, graceLeft, player);
+      }
+      if (this.campAlertCd > 0) this.campAlertCd -= dt;
+      return;
+    }
+
     const s = this.stats;
+    this.syncPlayerBuildBonuses(player);
+
+    // Forest Beckons — escalating wildlife wave every 60s.
+    if (s.forestBeckons) {
+      this.beckonsT -= dt;
+      if (this.beckonsT <= 0) {
+        this.beckonsT = 60;
+        this.beckonsWave++;
+        animals.spawnForestBeckonsWave(this.x, this.y, this.beckonsWave, threatM);
+        this.fx?.ring(this.x, this.y, 'rgba(109,212,106,0.85)', 20, 280, 0.55);
+        Audio.playSfx('howl', 0.7);
+      }
+    }
 
     this.incomeT -= dt;
     if (this.incomeT <= 0) {
       this.incomeT = MILL_INTERVAL;
       this.pay(player, this.x, this.y - 80, s.campWood, s.campMeat, s.campGold);
-      if (this.levels.mill) this.pay(player, this.x - 210, this.y + 90, s.millWood, 0, 0);
-      if (this.levels.mine) this.pay(player, this.x + 210, this.y + 90, 0, 0, s.mineGold);
-      if (this.levels.butcher) this.pay(player, this.x + 200, this.y - 100, 0, s.butcherMeat, 0);
+    }
+    if (this.levels.mill) {
+      this.millT -= dt;
+      if (this.millT <= 0) {
+        this.millT = s.millInterval;
+        this.pay(player, this.x - 210, this.y + 90, s.millWood, 0, 0);
+      }
+    }
+    if (this.levels.mine) {
+      this.mineT -= dt;
+      if (this.mineT <= 0) {
+        this.mineT = s.mineInterval;
+        this.pay(player, this.x + 210, this.y + 90, 0, 0, s.mineGold);
+      }
+    }
+    if (this.levels.butcher) {
+      this.butcherT -= dt;
+      if (this.butcherT <= 0) {
+        this.butcherT = s.butcherInterval;
+        this.pay(player, this.x + 200, this.y - 100, 0, s.butcherMeat, 0);
+      }
     }
 
     if (s.forgeLevel) {
@@ -845,12 +1075,24 @@ export class CampSystem {
       if (this.shopRefreshIn <= 0) this.restockShop(true);
     }
 
-    if (player.alive && this.contains(player.x, player.y) && s.healRate > 0 && player.hp < player.maxHp) {
-      player.hp = Math.min(player.maxHp, player.hp + s.healRate * dt);
-      this.healFx -= dt;
-      if (this.healFx <= 0) {
-        this.healFx = 0.35;
-        this.fx?.sparkle(player.x, player.y, '#9ef08a');
+    // Campfire heal: full rate in yard; Eternal Fire = half rate in expanded ring.
+    if (player.alive && s.healRate > 0 && player.hp < player.maxHp) {
+      const inYard = this.contains(player.x, player.y);
+      let rate = 0;
+      if (inYard) {
+        rate = s.healRate;
+      } else if (s.eternalFire) {
+        const d2 = dist2(player.x, player.y, this.x, this.y + 70);
+        const r = s.eternalHealR || 260;
+        if (d2 < r * r) rate = s.healRate * 0.5;
+      }
+      if (rate > 0) {
+        player.hp = Math.min(player.maxHp, player.hp + rate * dt);
+        this.healFx -= dt;
+        if (this.healFx <= 0) {
+          this.healFx = 0.35;
+          this.fx?.sparkle(player.x, player.y, '#9ef08a');
+        }
       }
     }
 
@@ -860,15 +1102,17 @@ export class CampSystem {
       this.fx?.sparks(this.x + (Math.random() - 0.5) * 12, this.y + 70, 1, '#ffb347');
     }
 
+    this.animT += dt;
+    this.redrawCampVisuals(animals);
+
     for (let i = 0; i < this.towers.length; i++) {
       this.towerTimers[i] -= dt;
       if (this.towerTimers[i] > 0) continue;
-      const tx = this.towers[i].x;
-      const ty = this.towers[i].y;
+      const tw = this.towers[i];
       const hits: { a: AnimalEntity; d2: number }[] = [];
       for (const a of animals.animals) {
         if (a.dead) continue;
-        const d2 = dist2(tx, ty, a.x, a.y);
+        const d2 = dist2(tw.x, tw.y, a.x, a.y);
         if (d2 > s.towerRange * s.towerRange) continue;
         hits.push({ a, d2 });
       }
@@ -879,8 +1123,11 @@ export class CampSystem {
         continue;
       }
       this.towerTimers[i] = 1 / s.fireRate;
+      // Face the first (nearest) target when firing.
+      if (hits[0].a.x < tw.x) tw.aim = -1;
+      else tw.aim = 1;
       for (let k = 0; k < n; k++) {
-        this.spawnArrow(tx, ty, hits[k].a, s.arrowDmg);
+        this.spawnArrow(tw.x, tw.y, hits[k].a, s.arrowDmg);
       }
     }
 
@@ -890,10 +1137,10 @@ export class CampSystem {
     if (isNight) {
       if (!this.raidActive && this.assaultNight !== dayNumber) {
         // Fallback if phase enter was missed (huge dt / tab blur).
-        this.startNightRaid(dayNumber, animals, threatM, graceLeft);
+        this.startNightRaid(dayNumber, animals, threatM, graceLeft, player);
         onRaid();
       }
-      this.updateNightRaid(dt, animals, threatM, graceLeft);
+      this.updateNightRaid(dt, animals, threatM, graceLeft, player);
     }
 
     this.updateOverlays();
@@ -1027,11 +1274,11 @@ export class CampSystem {
   }
 
   destroy() {
-    this.campSprite.destroy();
+    this.campCanvas.destroy();
     this.yardGfx.destroy();
     for (const w of this.walls) for (const s of w.sprites) s.destroy();
-    for (const t of this.towers) t.destroy();
-    for (const b of this.buildings) b.sprite?.destroy();
+    for (const t of this.towers) t.canvas.destroy();
+    for (const b of this.buildings) b.canvas?.destroy();
     for (const ar of this.arrows) ar.canvas.destroy();
     this.arrows.length = 0;
   }

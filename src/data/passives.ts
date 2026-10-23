@@ -36,7 +36,7 @@ export const ELEMENT_PASSIVES: Record<string, ElementId> = {
 };
 
 export const BONUS_DEFS: Record<string, { name: string; desc: string }> = {
-  gold: { name: 'Gold Pouch', desc: 'A pile of gold for the camp' },
+  gold: { name: 'Gold Pouch', desc: 'A pile of gold' },
   heal: { name: 'Roast Dinner', desc: 'Restore all health' },
 };
 

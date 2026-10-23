@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.2.6-alpha-build`
+Version: `0.2.7-alpha-build`
 
 A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + Vite, packaged with Electron. Play as a lumberjack in a hostile forest: chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids.
 
@@ -13,7 +13,7 @@ A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + V
 | Content | Count |
 |---|---|
 | Beast species | **14** |
-| Animal variants | **4** (Basic, Dire, Necromantic, Demonic) |
+| Animal variants | **7** (Basic, Dire, Necromantic, Demonic, Armored, Frenzied, Blessed) |
 | Elements | **6** (Fire, Water, Nature, Earth, Light, Darkness) |
 | Elemental enemy abilities | **18** (3 per element; more unlock with veterancy) |
 | True-boss signature moves | **10** (2 rolled per true boss) |
@@ -24,13 +24,13 @@ A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + V
 | Bonus cards | **2** (gold pouch, full heal) |
 | Level-up card pool | **46** kinds (weapons + passives + infusions + bonuses) |
 | World power-ups | **6** |
-| Camp upgrades | **11** |
+| Camp upgrades | **26** (**11** buildings + **12** sub-upgrades + **3** camp risks) |
 | Blacksmith gear slots | **14** |
 | Gear quality tiers | **6** (Poor → Legendary) |
 | Permanent meta upgrades | **15** |
 | Achievements | **10** (credits ×10 + weapon/card unlocks) |
-| World landmarks (POIs) | **4** kinds (den, wagon, shrine, vein; dawn reshuffle) |
-| Run mutators | **5** (stackable challenges) |
+| World landmarks (POIs) | **4** kinds (den, wagon, shrine, vein; dawn reshuffle; Vanilla bans veins) |
+| Run mutators | **6** (stackable challenges, including Vanilla) |
 | Win goals | **4** (Endless / Easy 6 / Medium 12 / Hard 18) |
 | Coach tutorials | **11** |
 | Opening grace | **30s** (peaceful wildlife; assaults/bosses held) |
@@ -49,10 +49,10 @@ Threat grows over time. Beasts gain **veterancy stars** and can roll **elements*
 1. **Chop & hunt** — fell trees, mine ore, defeat wildlife for resources and XP.
 2. **Explore landmarks** — dens, wagons, shrines, and rich veins (**E** nearby; reshuffle each dawn).
 3. **Level up** — choose from the **46**-kind card pool (weapons, passives, infusions, bonuses; **max 5** weapons; some unlock via achievements).
-4. **Fortify** — upgrade the camp (**11** buildings), towers, production, and blacksmith.
+4. **Fortify** — upgrade the camp (**11** buildings + accordion sub-upgrades / risks), towers, production, and blacksmith.
 5. **Survive the cycle** — daytime assault waves, dusk warnings, then night raids (miniboss most nights; true boss every **3rd** night with elite guards).
 
-Optional **run mutators** on the main menu (Savage, No Grace, Glass, Siege, Scarcity) stack and persist between sessions.
+Optional **run mutators** on the main menu (Savage, No Grace, Glass, Siege, Scarcity, **Vanilla**) stack and persist between sessions. Vanilla strips the camp for a pure hunt-the-player run (XP-only loot).
 
 Optional **win goals**: Endless, Easy (6 nights), Medium (12), Hard (18). Survive the final gauntlet night for a badge and bonus credits. Mid-run **checkpoints** save at dusk/dawn/pause; pause **Save & Quit** keeps Continue available.
 
@@ -65,10 +65,10 @@ The first **30 seconds** are calm: wildlife ignores you and the camp unless you 
 ### Beasts & combat pressure
 
 - **14 species** — boar, wolf, bear (and dire forms), deer, fox, squirrel, rat, raccoon, duck, sheep, beaver.
-- **4 variants** — Dire (tougher), Necromantic (splits on death), Demonic (fire pool on death).
-- **6 elements** with **18** enemy abilities total; veterancy unlocks more moves (1 → 2 → 3 → full pool).
+- **7 variants** — Dire (tougher), Necromantic (splits on death), Demonic (fire pool on death), Armored (DR), Frenzied (ramps at low HP), Blessed (aura).
+- **6 elements** with **18** enemy abilities total; veterancy unlocks more moves (1 → 2 → 3 → full pool). Telegraph → **0.5s** commit → act.
 - **10 true-boss moves** — Rampage, Fiery Ground, Inspiring Aura, Water Breath, Titan Stomp, Bone Volley, Crushing Leap, Skyfall, Ruin Beam, Dread Howl.
-- Status: poison DoT, slows, burn pools; camp/palisade hits flash a red vignette.
+- Status: poison and burn DoTs stack separately; slows; camp/palisade hits flash a red vignette.
 
 ### Defenses & camp
 
@@ -77,9 +77,10 @@ The first **30 seconds** are calm: wildlife ignores you and the camp unless you 
 | **Camp** | Core HP and passive resource income. If it falls, the run ends. |
 | **Palisade** | Walls that block raiders. |
 | **Watchtower / Archers / Barrage / Volley** | Auto-firing tower defenses (up to **8** towers). |
-| **Campfire** | Heals you while inside the camp. |
-| **Lumber Mill / Gold Mine / Butcher** | Periodic resource production. |
-| **Blacksmith** | Gear shop across **14** slots and **6** quality tiers; buying replaces the slot. |
+| **Campfire** | Heals you while inside the camp (+ Warm Embers / Guardian Flame / Eternal Fire). |
+| **Lumber Mill / Gold Mine / Butcher** | Periodic resource production (+ yield / speed sub-upgrades). |
+| **Blacksmith** | Gear shop across **14** slots and **6** quality tiers; buying replaces the slot (+ forge combat subs). |
+| **Camp risks** | Predator's Bait, Forest Beckons, Cursed Totem — high reward, permanent pressure. |
 
 Cabin and walls fully repair at dawn if you survive the night.
 

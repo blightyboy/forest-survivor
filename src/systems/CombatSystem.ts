@@ -5,6 +5,7 @@ import { applyBuffMultipliers } from './PlayerStats';
 import { gearBonuses } from '../data/shop';
 import type { MetaBonuses } from '../meta/Meta';
 import { dist2, TAU, clamp, compactInPlace, rand, lerp } from '../core/math';
+import { applyDot, DOT_INTERVAL } from '../core/dot';
 import type { World, StaticEntity } from '../world/World';
 import type { ArsenalSystem } from './ArsenalSystem';
 import type { AnimalSystem } from './AnimalSystem';
@@ -157,6 +158,8 @@ export class CombatSystem {
   private metaBonuses: MetaBonuses = {} as MetaBonuses;
   /** Mutator: scale resource/xp pickup amounts (not hearts/powerups). */
   lootMult = 1;
+  /** Mutator (Vanilla): trees drop XP instead of wood. */
+  xpOnlyLoot = false;
   nuking = false;
   /**
    * While true, spawnPickup grants loot straight to the player (cataclysm vacuum).
@@ -460,7 +463,7 @@ export class CombatSystem {
       const res = this.world.damageTree(t, t.maxHp + 9999);
       if (res.killed) {
         this.noteTreeKill(player);
-        if (res.wood) this.spawnPickup('wood', t.x, t.y, res.wood);
+        this.dropTreeLoot(t.x, t.y, res.wood);
         trees++;
       }
     }
@@ -505,12 +508,16 @@ export class CombatSystem {
    * `Math.pow(0.93, hasteLv) / (1 + gearHaste)`.
    */
   private cooldownMult(player: RunPlayer) {
-    return Math.pow(0.93, this.arsenal.passives.haste || 0) / (1 + (player.gearHaste || 0));
+    const build = player.buildHasteMul || 1;
+    return Math.pow(0.93, this.arsenal.passives.haste || 0) / (1 + (player.gearHaste || 0)) / build;
   }
 
   /** Legacy `g.ps.spin` for orbiting axes. */
   private spinMult(player: RunPlayer) {
-    return 1 + 0.08 * (this.arsenal.passives.haste || 0) + (player.gearHaste || 0) * 0.5;
+    return (
+      (1 + 0.08 * (this.arsenal.passives.haste || 0) + (player.gearHaste || 0) * 0.5) *
+      (player.buildHasteMul || 1)
+    );
   }
 
   private areaMult(player: RunPlayer) {
@@ -538,8 +545,9 @@ export class CombatSystem {
   calcDamage(base: number, element: ElementId | null, targetElement: ElementId | null, player: RunPlayer) {
     // Legacy hitAnimal: dmg * mightMult + flat (flat is not multiplied).
     const atk = element || player.attackElement || null;
-    const crit = Math.random() < player.crit;
-    let mult = player.damageMult * (crit ? 2 : 1) * rand(0.9, 1.1);
+    const critChance = clamp((player.crit || 0) + (player.buildCritAdd || 0), 0, 0.75);
+    const crit = Math.random() < critChance;
+    let mult = player.damageMult * (player.buildDmgMul || 1) * (crit ? 2 : 1) * rand(0.9, 1.1);
     if (atk) {
       // elementPower already includes gear + meta elemPct + mastery passives.
       mult *= 1 + (player.elementPower[atk] || 0);
@@ -1538,34 +1546,37 @@ export class CombatSystem {
 
   /** Taut fishing line + hook tip — distinct from stormflask zig-zag arcs. */
   private spawnFishingLine(x0: number, y0: number, x1: number, y1: number, color: number) {
-    const gfx = this.scene.add.graphics().setDepth(40);
+    const gfx = this.scene.add.graphics().setDepth(42);
     this.fxLayerSafeAdd(gfx);
+    // Soft sag mid-point (cord, not lightning).
     const mx = (x0 + x1) * 0.5;
-    const my = (y0 + y1) * 0.5 + 14;
-    // Cord shadow then main line (gentle sag, not lightning).
-    gfx.lineStyle(3.2, 0x2a1b12, 0.35);
-    gfx.beginPath();
-    gfx.moveTo(x0, y0);
-    gfx.lineTo(mx, my);
-    gfx.lineTo(x1, y1);
-    gfx.strokePath();
-    gfx.lineStyle(2, color, 0.95);
-    gfx.beginPath();
-    gfx.moveTo(x0, y0);
-    gfx.lineTo(mx, my);
-    gfx.lineTo(x1, y1);
-    gfx.strokePath();
-    // Hook at the catch.
+    const my = (y0 + y1) * 0.5 + 16;
+    // Dark outline for contrast on any biome.
+    gfx.lineStyle(4.5, 0x2a1b12, 0.55);
+    gfx.lineBetween(x0, y0, mx, my);
+    gfx.lineBetween(mx, my, x1, y1);
+    // Bright cord.
+    gfx.lineStyle(2.4, 0xf4ecd8, 1);
+    gfx.lineBetween(x0, y0, mx, my);
+    gfx.lineBetween(mx, my, x1, y1);
+    // Accent tint over the cord (elemental or warm beige).
+    gfx.lineStyle(1.5, color, 0.85);
+    gfx.lineBetween(x0, y0, mx, my);
+    gfx.lineBetween(mx, my, x1, y1);
+    // Hook tip at the catch — short chevron, no arc path issues.
     const ang = Math.atan2(y1 - my, x1 - mx);
-    const hx = x1 + Math.cos(ang) * 5;
-    const hy = y1 + Math.sin(ang) * 5;
-    gfx.lineStyle(2.2, color, 1);
-    gfx.beginPath();
-    gfx.arc(hx, hy, 5, ang - 0.4, ang + 2.4, false);
-    gfx.strokePath();
-    gfx.fillStyle(color, 0.9);
-    gfx.fillCircle(x1, y1, 2.2);
-    this.lightningArcs.push({ x0, y0, x1, y1, life: 0.32, maxLife: 0.32, color, gfx });
+    const px = Math.cos(ang);
+    const py = Math.sin(ang);
+    const qx = -py;
+    const qy = px;
+    gfx.lineStyle(2.6, color, 1);
+    gfx.lineBetween(x1 - px * 2, y1 - py * 2, x1 + px * 6 + qx * 4, y1 + py * 6 + qy * 4);
+    gfx.lineBetween(x1 - px * 2, y1 - py * 2, x1 + px * 6 - qx * 4, y1 + py * 6 - qy * 4);
+    gfx.fillStyle(0xffffff, 1);
+    gfx.fillCircle(x1, y1, 2.6);
+    gfx.fillStyle(color, 0.95);
+    gfx.fillCircle(x1, y1, 1.6);
+    this.lightningArcs.push({ x0, y0, x1, y1, life: 0.48, maxLife: 0.48, color, gfx });
   }
 
   private updateLightningArcs(dt: number) {
@@ -2044,8 +2055,8 @@ export class CombatSystem {
   private applyElementOnHit(a: AnimalEntity, element: ElementId | null, dealt: number) {
     if (!element || dealt < 1 || a.dead) return;
     if (element === 'fire') {
-      a.burns.push({ dps: (dealt * 0.4) / 3, life: 3 });
-      if (a.burns.length > 12) a.burns.splice(0, a.burns.length - 12);
+      // One tick ≈ 40% of the hit; further fire refreshes burn (unique, not poison).
+      applyDot(a.burns, dealt * 0.4, DOT_INTERVAL);
     } else if (element === 'water') {
       const add = clamp(dealt / (dealt + 60) * 0.4, 0.08, 0.4);
       a.slow = clamp(a.slow + add, 0, 0.7);
@@ -2094,12 +2105,12 @@ export class CombatSystem {
       Audio.playSfx('chop', rand(0.9, 1.15));
       if (res.killed) {
         this.noteTreeKill(player || this.grantPlayer);
-        if (res.wood) this.spawnPickup('wood', s.x, s.y, res.wood);
-        this.spawnPickup('xp', s.x + rand(-6, 6), s.y, 1);
+        this.dropTreeLoot(s.x, s.y, res.wood);
         Audio.playSfx('treeFall');
         this.onStaticKilled?.(s);
       }
     } else if (s.type === 'rock') {
+      if (this.xpOnlyLoot || s.invulnerable) return;
       const oreLoot =
         (1 + 0.18 * (this.arsenal.passives.greed || 0)) * (1 + (this.killCtx.threatM || 0) * 0.08);
       const res = this.world.damageRock(s, dmg, {
@@ -2120,6 +2131,18 @@ export class CombatSystem {
 
   /** Optional hook so the scene can remove sprites immediately. */
   onStaticKilled?: (s: StaticEntity) => void;
+
+  /** Tree fell — wood normally, or XP-only under Vanilla. */
+  private dropTreeLoot(x: number, y: number, wood?: number) {
+    const amt = wood ?? 0;
+    if (this.xpOnlyLoot) {
+      const xp = Math.max(1, Math.round(amt || 1) + 1);
+      this.spawnPickup('xp', x + rand(-6, 6), y, xp);
+      return;
+    }
+    if (amt) this.spawnPickup('wood', x, y, amt);
+    this.spawnPickup('xp', x + rand(-6, 6), y, 1);
+  }
 
   private updatePickups(dt: number, player: RunPlayer) {
     const magnet = player.magnetR;
@@ -2218,8 +2241,7 @@ export class CombatSystem {
   }
 
   private updatePools(dt: number, player: RunPlayer) {
-    let inPool = false;
-    let poolDmg = 0;
+    let inFirePool = false;
     if (!this.poolGfx) {
       this.poolGfx = this.scene.add.graphics().setDepth(5);
       this.fxLayerSafeAdd(this.poolGfx);
@@ -2234,55 +2256,93 @@ export class CombatSystem {
       const hex = pool.color || (isPoison ? '#6dd46a' : '#ff6a3d');
       const col = Phaser.Display.Color.HexStringToColor(hex).color;
       const pulse = 0.55 + 0.2 * Math.sin(pool.life * 6);
-      pg.fillStyle(col, isPoison ? 0.28 * pulse : 0.22 * pulse);
-      pg.fillEllipse(pool.x, pool.y, pool.r * 2, pool.r * 1.35);
-      pg.lineStyle(2, col, isPoison ? 0.45 : 0.35);
-      pg.strokeEllipse(pool.x, pool.y, pool.r * 2, pool.r * 1.35);
+      if (isPoison) {
+        // Boiling ooze — layered pool + rising bubbles.
+        const boil = 0.6 + 0.25 * Math.sin(pool.life * 9);
+        pg.fillStyle(col, 0.34 * boil);
+        pg.fillEllipse(pool.x, pool.y, pool.r * 2.05, pool.r * 1.4);
+        pg.fillStyle(0x1a3a14, 0.22);
+        pg.fillEllipse(pool.x, pool.y + 1, pool.r * 1.45, pool.r * 0.95);
+        pg.lineStyle(2.2, col, 0.55 * boil);
+        pg.strokeEllipse(pool.x, pool.y, pool.r * 2.05, pool.r * 1.4);
+        pg.lineStyle(1.4, 0xd4ffc8, 0.35);
+        pg.strokeEllipse(pool.x, pool.y - 1, pool.r * 1.55, pool.r * 1.0);
+        const bubbles = Math.max(5, Math.round(pool.r / 12));
+        for (let i = 0; i < bubbles; i++) {
+          const seed = pool.x * 0.17 + pool.y * 0.11 + i * 19.7;
+          const speed = 1.6 + (i % 4) * 0.45;
+          const cycle = ((-pool.life * speed + seed) % 1 + 1) % 1;
+          const a = (i / bubbles) * Math.PI * 2 + pool.life * 0.55 + seed * 0.05;
+          const dist = pool.r * (0.18 + 0.62 * ((Math.sin(seed * 1.3) * 0.5 + 0.5)));
+          const grow = Math.sin(cycle * Math.PI);
+          if (grow < 0.08) continue;
+          const bx = pool.x + Math.cos(a) * dist * (0.9 + 0.1 * Math.sin(pool.life * 5 + i));
+          const by = pool.y + Math.sin(a) * dist * 0.52 - cycle * (8 + pool.r * 0.12);
+          const br = 1.6 + grow * (3.2 + (i % 3));
+          pg.fillStyle(0xb8f0a0, 0.25 + grow * 0.45);
+          pg.fillCircle(bx, by, br);
+          pg.fillStyle(0xffffff, 0.35 + grow * 0.4);
+          pg.fillCircle(bx - br * 0.28, by - br * 0.32, Math.max(0.8, br * 0.32));
+          pg.lineStyle(1.1, 0xd4ffc8, 0.4 + grow * 0.4);
+          pg.strokeCircle(bx, by, br);
+        }
+        if (Math.random() < dt * 7) {
+          const pa = Math.random() * Math.PI * 2;
+          const pr = pool.r * (0.2 + Math.random() * 0.55);
+          this.vfx?.sparks(
+            pool.x + Math.cos(pa) * pr,
+            pool.y + Math.sin(pa) * pr * 0.5 - 4,
+            2,
+            hex,
+          );
+        }
+      } else {
+        pg.fillStyle(col, 0.22 * pulse);
+        pg.fillEllipse(pool.x, pool.y, pool.r * 2, pool.r * 1.35);
+        pg.lineStyle(2, col, 0.35);
+        pg.strokeEllipse(pool.x, pool.y, pool.r * 2, pool.r * 1.35);
+      }
 
       if (!isPoison && dist2(pool.x, pool.y, player.x, player.y) < pool.r * pool.r) {
-        inPool = true;
-        poolDmg += pool.dmg * dt;
+        inFirePool = true;
       }
       for (const a of this.animals.animals) {
         if (a.dead) continue;
-        if (dist2(pool.x, pool.y, a.x, a.y) < pool.r * pool.r) {
-          const mul = isPoison ? 0.65 : 0.5;
-          this.animals.damageAnimal(
-            a,
-            pool.dmg * dt * mul,
-            player,
-            this.pickups,
-            this.pools,
-            this.killCtx,
-          );
+        if (dist2(pool.x, pool.y, a.x, a.y) >= pool.r * pool.r) continue;
+        if (isPoison) {
+          if (a.poisonPoolCd > 0) continue;
+          a.poisonPoolCd = 1;
+          applyDot(a.poisons, pool.dmg * 0.55, DOT_INTERVAL * 2);
+          this.vfx?.sparks(a.x, a.y - a.radius * 0.5, 3, hex);
+        } else {
+          if (a.burnPoolCd > 0) continue;
+          a.burnPoolCd = 1;
+          applyDot(a.burns, pool.dmg * 0.45, DOT_INTERVAL * 2);
+          this.vfx?.sparks(a.x, a.y - a.radius * 0.5, 3, hex);
         }
+        a.flash = Math.max(a.flash, 0.08);
+      }
+    }
+
+    // Fire-pool player: stack burn once per second while standing in flames.
+    if ((player.burnPoolCd || 0) > 0) {
+      player.burnPoolCd = Math.max(0, (player.burnPoolCd || 0) - dt);
+    }
+    if (inFirePool && player.alive) {
+      player.burnT = Math.max(player.burnT || 0, 0.55);
+      if ((player.burnPoolCd || 0) <= 0) {
+        player.burnPoolCd = 1;
+        let strongest = 8;
+        for (const pool of this.pools) {
+          if (pool.dead || pool.kind === 'poison') continue;
+          if (dist2(pool.x, pool.y, player.x, player.y) < pool.r * pool.r) {
+            strongest = Math.max(strongest, pool.dmg);
+          }
+        }
+        applyDot(player.burns, strongest * 0.55, DOT_INTERVAL * 2);
       }
     }
     if (player.burnT && player.burnT > 0) player.burnT = Math.max(0, player.burnT - dt);
-    if (inPool && player.alive && poolDmg > 0) {
-      player.burnT = Math.max(player.burnT || 0, 0.55);
-      player.burnAcc = (player.burnAcc || 0) + poolDmg;
-      if (player.burnAcc >= 1) {
-        const tick = Math.floor(player.burnAcc);
-        player.burnAcc -= tick;
-        player.hp -= tick;
-        this.onFloatText?.(
-          player.x + rand(-8, 8),
-          player.y - 34,
-          String(tick),
-          '#ff8a3d',
-          13,
-          { life: 0.5, vy: -22 },
-        );
-        this.vfx?.sparks(player.x, player.y - 6, 3, '#ff8a3d');
-        if (player.hp <= 0) {
-          player.hp = 0;
-          player.alive = false;
-        }
-      }
-    } else if (!inPool) {
-      player.burnAcc = 0;
-    }
     compactInPlace(this.pools, (p) => p.dead);
   }
 }

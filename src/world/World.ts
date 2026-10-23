@@ -68,6 +68,8 @@ export class Rock {
   maxHp: number;
   hp: number;
   dead = false;
+  /** Vanilla mutator — ore rocks cannot be damaged or targeted. */
+  invulnerable = false;
 
   constructor(x: number, y: number, rng: RNG, ore: boolean, size: number) {
     this.x = x;
@@ -87,7 +89,7 @@ export class Rock {
   }
 
   isHittable() {
-    return this.ore && !this.dead;
+    return this.ore && !this.dead && !this.invulnerable;
   }
 }
 
@@ -129,6 +131,8 @@ export class World {
   rocks: Rock[] = [];
   bushes: Bush[] = [];
   pois: WorldPoi[] = [];
+  /** Kinds skipped when placing landmarks (e.g. Vanilla bans rich veins). */
+  poiExclude: PoiKind[] = [];
   staticGrid: SpatialGrid;
   bushGrid: SpatialGrid;
   private _q: StaticEntity[] = [];
@@ -419,20 +423,31 @@ export class World {
     this.placePois(rng, this.spawnX, this.spawnY, this.w, this.h);
   }
 
+  /** Ban landmark kinds (strips existing + future reshuffles). */
+  setPoiExclude(kinds: PoiKind[]) {
+    this.poiExclude = [...kinds];
+    if (!kinds.length) return;
+    this.pois = this.pois.filter((p) => !kinds.includes(p.kind));
+  }
+
   /** Restore landmark layout from a mid-run checkpoint. */
   loadPois(list: { id: number; kind: string; x: number; y: number; used: boolean }[]) {
-    this.pois = list.map((p) => ({
-      id: p.id,
-      kind: (POI_KINDS as readonly string[]).includes(p.kind) ? (p.kind as PoiKind) : 'wagon',
-      x: p.x,
-      y: p.y,
-      used: !!p.used,
-    }));
+    this.pois = list
+      .map((p) => ({
+        id: p.id,
+        kind: (POI_KINDS as readonly string[]).includes(p.kind) ? (p.kind as PoiKind) : 'wagon',
+        x: p.x,
+        y: p.y,
+        used: !!p.used,
+      }))
+      .filter((p) => !this.poiExclude.includes(p.kind));
     this.nextPoiId = list.reduce((m, p) => Math.max(m, p.id), 0) + 1;
   }
 
   /** Seed ~8–12 one-shot landmarks outside the camp ring. */
   private placePois(rng: RNG, sx: number, sy: number, W: number, H: number) {
+    const pool = POI_KINDS.filter((k) => !this.poiExclude.includes(k));
+    if (!pool.length) return;
     const target = 8 + rng.int(0, 4);
     const minCamp = 620;
     // Camp-scale landmarks need more clearance from each other / trees.
@@ -451,7 +466,7 @@ export class World {
         }
       }
       if (nearPoi) continue;
-      const kind = POI_KINDS[rng.int(0, POI_KINDS.length - 1)] as PoiKind;
+      const kind = pool[rng.int(0, pool.length - 1)] as PoiKind;
       this.pois.push({
         id: this.nextPoiId++,
         kind,

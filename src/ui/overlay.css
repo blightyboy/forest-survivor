@@ -2850,6 +2850,86 @@ body {
   font-size: 0.75rem;
   color: #3a2402;
 }
+.fs-upg-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.25em;
+  flex: none;
+}
+.fs-upg-chevron {
+  width: 1.75em;
+  height: 1.75em;
+  min-width: 1.75em;
+  border-radius: 0.45em;
+  border: 2px solid #3a2a18;
+  background: linear-gradient(#4a3a28, #2e2418);
+  color: #ffe08a;
+  font-size: 0.95rem;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 2px 0 #1a140c;
+}
+.fs-upg-chevron:hover { filter: brightness(1.15); }
+.fs-upg-chevron.open { background: linear-gradient(#5a6a3a, #3a4a22); border-color: #2a3a14; color: #d4ffc8; }
+.fs-upg-lv-badge {
+  position: absolute;
+  right: -0.2em;
+  bottom: -0.15em;
+  min-width: 1.1em;
+  height: 1.1em;
+  padding: 0 0.2em;
+  border-radius: 999px;
+  background: #3a8a2a;
+  border: 1.5px solid #1e4a14;
+  color: #e8ffe0;
+  font-size: 0.62rem;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 1px 0 #0e280a;
+}
+.fs-upg-row.child {
+  margin-left: 0.65em;
+  padding: 0.4em 0.45em;
+  background: rgba(20, 14, 8, 0.55);
+  border-color: #2a2014;
+}
+.fs-upg-row.child .fs-upg-ico {
+  width: 2.35em;
+  height: 2.35em;
+  min-width: 2.35em;
+}
+.fs-upg-row.child .fs-upg-ico svg {
+  width: 1.55em;
+  height: 1.55em;
+}
+.fs-upg-row.child .fs-upg-buy {
+  width: 4.25em;
+  min-width: 4.25em;
+  min-height: 2.35em;
+}
+.fs-upg-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  margin: 0.15em 0 0.55em;
+  padding: 0.35em 0.2em 0.45em 0.35em;
+  border-left: 2px solid rgba(201, 162, 39, 0.35);
+}
+.fs-upg-children-label {
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #c9a227;
+  padding: 0.1em 0.35em 0.25em;
+  opacity: 0.9;
+}
 
 .fs-hud-btns {
   margin-left: auto;

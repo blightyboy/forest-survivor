@@ -1,5 +1,6 @@
 import type { ElementId } from '../data/constants';
 import type { GearItem, EquipmentLoadout } from '../data/shop';
+import type { DotStack } from '../core/dot';
 
 export type PickupKind = 'xp' | 'wood' | 'meat' | 'gold' | 'heart' | 'powerup';
 
@@ -37,8 +38,10 @@ export interface RunPlayer {
   /** Player slow from enemy gloom / breath (0–1). */
   slow: number;
   slowT: number;
-  /** Nature poison DoT stacks from enemy abilities. */
-  poisons: { dps: number; life: number }[];
+  /** Nature poison DoT (3s ticks; unique — refresh keeps stronger tick). */
+  poisons: DotStack[];
+  /** Fire burn DoT (3s ticks; unique — separate from poison). */
+  burns: DotStack[];
   magnetR: number;
   damageMult: number;
   flatDamage: number;
@@ -68,12 +71,20 @@ export interface RunPlayer {
   buffHaste: number;
   /** Crimson Charm — slain foes may drop healing hearts. */
   buffHearts: number;
-  /** Accrues fractional poison damage for tick feedback (legacy poisonAcc). */
-  poisonAcc?: number;
-  /** Accrues fractional fire-pool DoT for tick feedback. */
-  burnAcc?: number;
-  /** Seconds left showing "Burn" debuff while standing in a damage pool. */
+  /** Seconds left showing "Burn" while recently standing in a fire pool. */
   burnT?: number;
+  /** Gate for refreshing fire-pool burn while standing in flames. */
+  burnPoolCd?: number;
+  /** From blacksmith / camp risk / campfire subs — synced each frame by CampSystem. */
+  buildDmgMul?: number;
+  buildArmorDr?: number;
+  buildCritAdd?: number;
+  buildHasteMul?: number;
+  /** Extra DR while standing in the camp yard (Guardian Flame). */
+  guardianDr?: number;
+  predatorsBait?: boolean;
+  forestBeckons?: boolean;
+  cursedTotem?: boolean;
 }
 
 export interface RunStats {

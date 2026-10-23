@@ -9,6 +9,9 @@ export type CoachStep = {
   title: string;
   /** Short body — keep to a few lines; spotlight cards are compact. */
   body: string;
+  /** Vanilla (no camp) alternate copy — omits cabin / yard wording. */
+  titleNoCamp?: string;
+  bodyNoCamp?: string;
   /** data-coach attribute value on a HUD / panel element. */
   target?: string;
   prepare?: CoachPrepare;
@@ -37,6 +40,9 @@ export const COACH_STEPS: Record<string, CoachStep> = {
     body:
       '<p><b>Wood</b> from trees, <b>meat</b> from beasts, <b>gold</b> from ores and lucky kills.</p>' +
       '<p>Spend them at camp to build defenses, production, and gear.</p>',
+    bodyNoCamp:
+      '<p><b>Wood</b> from trees, <b>meat</b> from beasts, <b>gold</b> from ores and lucky kills.</p>' +
+      '<p>In Vanilla, beasts and wagons drop <b>XP only</b> — stay alive and level up.</p>',
     target: 'resources',
   },
   enemy: {
@@ -80,6 +86,9 @@ export const COACH_STEPS: Record<string, CoachStep> = {
     body:
       '<p>Get back to camp before dark. Raiders march from the forest edge.</p>' +
       '<p>A <b>miniboss</b> leads most nights; every <b>3rd night</b> a true boss arrives.</p>',
+    bodyNoCamp:
+      '<p>Raiders hunt <b>you</b> from the forest edge after dark.</p>' +
+      '<p>A <b>miniboss</b> leads most nights; every <b>3rd night</b> a true boss arrives.</p>',
     target: 'time',
   },
   threat: {
@@ -88,6 +97,9 @@ export const COACH_STEPS: Record<string, CoachStep> = {
     body:
       '<p>Threat climbs with time — beasts gain HP, damage, and veterancy stars.</p>' +
       '<p>Push farther for richer loot, or stay near camp when nights get ugly.</p>',
+    bodyNoCamp:
+      '<p>Threat climbs with time — beasts gain HP, damage, and veterancy stars.</p>' +
+      '<p>Push farther for richer XP, or play safe when nights get ugly.</p>',
     target: 'threat',
   },
   levelup: {

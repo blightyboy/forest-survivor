@@ -16,6 +16,8 @@ export type AnimalDrawView = {
   big?: boolean;
   boss?: boolean;
   flash: number;
+  /** Frenzied below 40% HP — hotter marks. */
+  frenzyHot?: boolean;
   /** Local art-space size (unscaled SPECIES values — ctx.scale applies entity scale). */
   height?: number;
   radius?: number;
@@ -161,6 +163,74 @@ export function drawNecroEyes(ctx, a) {
   ctx.fill();
 }
 
+/** Specular arcs for armored / metallic variants. */
+export function drawArmoredShine(ctx, a) {
+  const { bodyOff, r } = localBodyMetrics(a);
+  const cy = -Math.max(10, bodyOff * 0.85);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(235, 245, 255, 0.85)';
+  ctx.lineWidth = Math.max(1.2, r * 0.08);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(2, cy, r * 0.72, -2.4, -0.9);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(200, 220, 240, 0.55)';
+  ctx.lineWidth = Math.max(0.9, r * 0.05);
+  ctx.beginPath();
+  ctx.arc(4, cy + r * 0.15, r * 0.5, -0.4, 0.7);
+  ctx.stroke();
+  // Small plate glints.
+  ctx.fillStyle = 'rgba(240, 248, 255, 0.7)';
+  ellipse(ctx, -r * 0.35, cy - r * 0.2, r * 0.12, r * 0.06);
+  ctx.fill();
+  ellipse(ctx, r * 0.4, cy + r * 0.1, r * 0.1, r * 0.05);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Hot streaks / bristled mane cue when frenzied (stronger look when low HP). */
+export function drawFrenziedMarks(ctx, a, hot = false) {
+  const { bodyOff, h, r } = localBodyMetrics(a);
+  const backY = -bodyOff - h * 0.08;
+  const span = Math.max(8, r * 0.9);
+  const rise = Math.max(5, h * (hot ? 0.42 : 0.28));
+  ctx.save();
+  ctx.strokeStyle = hot ? '#ff4a18' : '#ff8a40';
+  ctx.lineWidth = Math.max(1.1, r * 0.07);
+  ctx.lineCap = 'round';
+  for (const xn of [-0.7, -0.25, 0.25, 0.7]) {
+    ctx.beginPath();
+    ctx.moveTo(xn * span, backY + 2);
+    ctx.lineTo(xn * span * 1.05, backY - rise);
+    ctx.stroke();
+  }
+  if (hot) {
+    ctx.fillStyle = 'rgba(255, 80, 20, 0.35)';
+    ellipse(ctx, 2, -bodyOff, r * 1.05, r * 0.55);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Soft gold halo for blessed variants. */
+export function drawBlessedHalo(ctx, a) {
+  const { bodyOff, h, r } = localBodyMetrics(a);
+  const hy = -bodyOff - h * 0.55;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 224, 100, 0.85)';
+  ctx.lineWidth = Math.max(1.4, r * 0.08);
+  ellipse(ctx, 2, hy, r * 0.7, r * 0.28);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 248, 200, 0.45)';
+  ctx.lineWidth = Math.max(0.8, r * 0.04);
+  ellipse(ctx, 2, hy, r * 0.9, r * 0.38);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 230, 120, 0.5)';
+  ellipse(ctx, 2, hy - r * 0.05, r * 0.12, r * 0.08);
+  ctx.fill();
+  ctx.restore();
+}
+
 /** Tiny glyph above the HP bar for non-basic variants. */
 export function drawVariantMark(ctx, x, y, variant) {
   const v = ANIMAL_VARIANTS[variant];
@@ -201,6 +271,47 @@ export function drawVariantMark(ctx, x, y, variant) {
     ctx.fill();
     ctx.strokeStyle = '#3a2410';
     ctx.lineWidth = 0.8;
+    ctx.stroke();
+  } else if (variant === 'armored') {
+    ctx.fillStyle = v.bar;
+    ctx.beginPath();
+    ctx.moveTo(0, -4);
+    ctx.lineTo(3.5, -1);
+    ctx.lineTo(3.5, 2);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-3.5, 2);
+    ctx.lineTo(-3.5, -1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#3a4a5a';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  } else if (variant === 'frenzied') {
+    ctx.fillStyle = v.bar;
+    ctx.beginPath();
+    ctx.moveTo(-1, -4);
+    ctx.lineTo(1.5, -1);
+    ctx.lineTo(0, 0);
+    ctx.lineTo(3, 4);
+    ctx.lineTo(-0.5, 1);
+    ctx.lineTo(0.5, 0);
+    ctx.closePath();
+    ctx.fill();
+  } else if (variant === 'blessed') {
+    ctx.fillStyle = v.bar;
+    ctx.beginPath();
+    for (let p = 0; p < 10; p++) {
+      const ang = -Math.PI / 2 + (p * Math.PI) / 5;
+      const rr = p % 2 === 0 ? 3.4 : 1.5;
+      const px = Math.cos(ang) * rr;
+      const py = Math.sin(ang) * rr;
+      if (p === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#8a6a10';
+    ctx.lineWidth = 0.7;
     ctx.stroke();
   }
   ctx.restore();
@@ -751,6 +862,7 @@ export function drawAnimalBody(ctx: Ctx, a: AnimalDrawView, windup: boolean, ang
   // Rim under the body so it never paints over fur / antlers.
   if (vDef?.rim) drawVariantRim(ctx, a as never, vDef as never);
   if (a.variant === 'demonic') drawDemonicSpikes(ctx, a as never);
+  if (a.variant === 'frenzied') drawFrenziedMarks(ctx, a as never, !!a.frenzyHot);
   switch (animalFamily(a.species)) {
     case 'wolf': drawWolf(ctx, a as never, flash, windup, angry); break;
     case 'bear': drawBear(ctx, a as never, flash, windup, angry); break;
@@ -765,6 +877,8 @@ export function drawAnimalBody(ctx: Ctx, a: AnimalDrawView, windup: boolean, ang
     default: drawBoar(ctx, a as never, flash, windup, angry);
   }
   if (a.variant === 'necromantic') drawNecroEyes(ctx, a as never);
+  if (a.variant === 'armored') drawArmoredShine(ctx, a as never);
+  if (a.variant === 'blessed') drawBlessedHalo(ctx, a as never);
   if (a.boss) drawCrown(ctx, a.sp.eye[0] - 3, a.sp.eye[1] - 11);
   if (flash) drawHitFlash(ctx, a as never);
 }

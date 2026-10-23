@@ -217,8 +217,8 @@ export const WEAPON_DEFS: Record<string, WeaponDef> = {
   },
   poisonflask: {
     name: 'Poison Bottle',
-    text: ['Throws a vial that shatters into a green ooze pool', '+14 pool DPS', 'Wider pool', '+1 vial', 'Thrown 20% faster',
-      'Longer ooze', '+18 pool DPS', 'Huge pool, +16 DPS'],
+    text: ['Throws a vial that shatters into boiling ooze — poisons beasts (3s ticks)', '+14 poison tick', 'Wider pool', '+1 vial', 'Thrown 20% faster',
+      'Longer ooze', '+18 poison tick', 'Huge pool, +16 tick'],
     stats: (l) => ({
       count: 1 + at(l, 4, 1),
       dmg: 22 + at(l, 2, 14) + at(l, 7, 18) + at(l, 8, 16),

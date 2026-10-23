@@ -2,6 +2,8 @@ import { formatNum, formatTime, BUILD_VERSION } from '../core/math';
 import {
   xpNeeded,
   UPGRADES,
+  upgradeChildren,
+  buildParentUpgrades,
   threatAt,
   ELEMENTS,
   ELEMENT_INFUSE,
@@ -110,6 +112,12 @@ export class DomUI {
   private campPanelOpen = true;
   private campPanelCache = '';
   private campBuilt = false;
+  /** Build accordion: which parent rows are expanded. */
+  private buildExpanded = new Set<string>();
+  /** Parents we've already auto-expanded once (so the user can collapse them). */
+  private buildAutoOpened = new Set<string>();
+  /** Vanilla mutator — no camp panel / camp HP bar. */
+  noCampMode = false;
   /** Savage (etc.) — scales threat readout to match run modifiers. */
   threatHudMult = 1;
   private fpsAcc = 0;
@@ -430,7 +438,11 @@ export class DomUI {
       const timer = this.eventHudEl.querySelector('#event-timer');
       if (title) title.textContent = 'Grace';
       if (ico) ico.innerHTML = ICONS.world_grace || '';
-      if (sub) sub.textContent = 'Wildlife ignores you and the camp — until you strike';
+      if (sub) {
+        sub.textContent = this.noCampMode
+          ? 'Wildlife ignores you — until you strike'
+          : 'Wildlife ignores you and the camp — until you strike';
+      }
       if (timer) timer.textContent = `${mm}:${String(ss).padStart(2, '0')}`;
       this.eventHudEl.classList.remove('hidden');
     } else {
@@ -507,19 +519,23 @@ export class DomUI {
     push('hearts', player.buffHearts);
     // Debuff chips so poison / slow are obvious while ticking.
     if (player.poisons.length) {
-      let maxLife = 0;
-      for (const b of player.poisons) maxLife = Math.max(maxLife, b.life);
+      const d = player.poisons[0];
       bits.push(
-        `<div class="fs-buff fs-debuff" style="border-color:#6dd46a" title="Poisoned — taking damage over time">` +
+        `<div class="fs-buff fs-debuff" style="border-color:#6dd46a" title="Poisoned — ${Math.round(d.tickDmg)} dmg every 3s">` +
           `<span class="fs-buff-ico">${icon('elem_poison', 'nature')}</span>` +
-          `<b style="color:#6dd46a">Poison</b><span>${Math.ceil(maxLife)}s</span></div>`,
+          `<b style="color:#6dd46a">Poison</b><span>${Math.ceil(d.life)}s</span></div>`,
       );
     }
-    if ((player.burnT || 0) > 0) {
+    if (player.burns.length || (player.burnT || 0) > 0) {
+      const d = player.burns[0];
+      const life = d ? Math.ceil(d.life) : '!';
+      const tip = d
+        ? `Burning — ${Math.round(d.tickDmg)} dmg every 3s`
+        : 'Burning — standing in a damage pool';
       bits.push(
-        `<div class="fs-buff fs-debuff" style="border-color:#ff8a3d" title="Burning — standing in a damage pool">` +
+        `<div class="fs-buff fs-debuff" style="border-color:#ff8a3d" title="${tip}">` +
           `<span class="fs-buff-ico">${icon('elem_scorch', 'fire')}</span>` +
-          `<b style="color:#ff8a3d">Burn</b><span>!</span></div>`,
+          `<b style="color:#ff8a3d">Burn</b><span>${life}${d ? 's' : ''}</span></div>`,
       );
     }
     if (player.slowT > 0 && player.slow > 0.05) {
@@ -565,6 +581,7 @@ export class DomUI {
   }
 
   setCampPanelOpen(open: boolean) {
+    if (this.noCampMode) open = false;
     this.campPanelOpen = open;
     this.campPanelEl.classList.toggle('collapsed', !open);
     this.hudEl.querySelector('#btn-camp-toggle')?.classList.toggle('active', open);
@@ -572,13 +589,35 @@ export class DomUI {
   }
 
   toggleCampPanel(force?: boolean) {
+    if (this.noCampMode) return;
     this.setCampPanelOpen(typeof force === 'boolean' ? force : !this.campPanelOpen);
   }
 
   showCampPanelForRun() {
+    if (this.noCampMode) {
+      this.hideCampPanel();
+      return;
+    }
     this.campPanelEl.classList.remove('hidden');
+    this.buildExpanded.clear();
+    this.buildAutoOpened.clear();
     this.setCampPanelOpen(true);
     this.setCampSmithTab(false);
+  }
+
+  /** Vanilla: hide camp HUD, resources strip, and build panel for the run. */
+  setNoCampMode(on: boolean) {
+    this.noCampMode = on;
+    const campRow = document.getElementById('hud-camp-bar')?.closest('.fs-bar-row') as HTMLElement | null;
+    campRow?.classList.toggle('hidden', on);
+    const campBtn = this.hudEl.querySelector('#btn-camp-toggle') as HTMLElement | null;
+    campBtn?.classList.toggle('hidden', on);
+    const resPanel = this.hudEl.querySelector('.fs-resources') as HTMLElement | null;
+    resPanel?.classList.toggle('hidden', on);
+    if (on) {
+      this.hideCampPanel();
+      this.setTip('WASD move · E interact · Shift/Space dash · F aim lock · Esc pause');
+    }
   }
 
   hideCampPanel() {
@@ -603,6 +642,7 @@ export class DomUI {
       .map((k) => `${k}:${camp.levels[k]}`)
       .join(',');
     const gearKey = ITEM_SLOTS.map((s) => player.equipment[s]?.id || '-').join(',');
+    const expandKey = [...this.buildExpanded].sort().join(',');
     const cache = [
       atCamp ? 1 : 0,
       this.campSmithTab ? 1 : 0,
@@ -614,6 +654,7 @@ export class DomUI {
       camp.smithRerolls,
       camp.stats.forgeLevel,
       gearKey,
+      expandKey,
       this.campSmithTab ? Math.floor(camp.shopRefreshIn) : 0,
     ].join(';');
     if (cache === this.campPanelCache) return;
@@ -629,49 +670,112 @@ export class DomUI {
     }
 
     if (!this.campSmithTab) {
-      const list = this.campPanelEl.querySelector('#camp-side-list');
-      if (!list) return;
-      const s = camp.stats;
-      list.innerHTML = UPGRADES.map((u, i) => {
-        const lv = camp.levels[u.id] || 0;
-        const maxed = lv >= u.max;
-        const locked = !!(u.requires && !u.requires(camp.levels));
-        const cost = camp.upgradeCost(u.id);
-        const canPay = Object.entries(cost).every(([k, v]) => (player[k as 'wood' | 'meat' | 'gold'] || 0) >= v);
-        const affordable = !maxed && !locked && canPay && atCamp;
-        const costHtml = maxed
-          ? '<span class="max">MAXED</span>'
-          : Object.entries(cost)
-              .map(([k, v]) => {
-                const have = player[k as 'wood' | 'meat' | 'gold'] || 0;
-                return `<span class="ci ${have >= v ? '' : 'lack'}">${icon(k)}${formatNum(v)}</span>`;
-              })
-              .join('');
-        let valHtml: string;
-        if (maxed) valHtml = `<span class="uv-cur">${u.value(s)}</span>`;
-        else if (locked) valHtml = `<span class="req">${u.reqText || 'Locked'}</span>`;
-        else valHtml = `<span class="uv-cur">${u.value(s)}</span>`;
-        return `<div class="fs-upg-row ${maxed ? 'maxed' : ''} ${affordable ? 'affordable' : 'locked'}" data-up="${u.id}">
-          <div class="fs-upg-ico">${icon(u.id, 'camp')}<kbd>${i + 1}</kbd></div>
-          <div class="fs-upg-body">
-            <div class="fs-upg-title"><span>${u.name}</span><span class="fs-upg-lv">${lv}/${u.max}</span></div>
-            <div class="fs-upg-desc">${u.desc}</div>
-            <div class="fs-upg-val">${valHtml}</div>
-          </div>
-          <button type="button" class="fs-upg-buy" data-up="${u.id}" ${affordable ? '' : 'disabled'}>${costHtml}</button>
-        </div>`;
-      }).join('');
-      list.querySelectorAll('.fs-upg-buy[data-up]').forEach((btn) => {
-        btn.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          const id = (btn as HTMLElement).dataset.up!;
-          this.onUpgradeCamp?.(id);
-        });
-      });
+      this.renderBuildPanel(camp, player, atCamp);
     } else {
       this.renderSmithPanel(camp, player, atCamp);
     }
+  }
+
+  private renderUpgradeRow(
+    u: (typeof UPGRADES)[number],
+    camp: CampSystem,
+    player: RunPlayer,
+    atCamp: boolean,
+    opts: { hotkey?: number; child?: boolean },
+  ): string {
+    const s = camp.stats;
+    const lv = camp.levels[u.id] || 0;
+    const maxed = lv >= u.max;
+    const locked = !!(u.requires && !u.requires(camp.levels));
+    const cost = camp.upgradeCost(u.id);
+    const canPay = Object.entries(cost).every(([k, v]) => (player[k as 'wood' | 'meat' | 'gold'] || 0) >= v);
+    const affordable = !maxed && !locked && canPay && atCamp;
+    const costHtml = maxed
+      ? '<span class="max">MAXED</span>'
+      : Object.entries(cost)
+          .map(([k, v]) => {
+            const have = player[k as 'wood' | 'meat' | 'gold'] || 0;
+            return `<span class="ci ${have >= v ? '' : 'lack'}">${icon(k)}${formatNum(v)}</span>`;
+          })
+          .join('');
+    let valHtml: string;
+    if (maxed) valHtml = `<span class="uv-cur">${u.value(s)}</span>`;
+    else if (locked) valHtml = `<span class="req">${u.reqText || 'Locked'}</span>`;
+    else valHtml = `<span class="uv-cur">${u.value(s)}</span>`;
+    const kids = upgradeChildren(u.id);
+    const expandable = !!(u.expandable && kids.length);
+    const expanded = expandable && this.buildExpanded.has(u.id);
+    const kbd = opts.hotkey != null ? `<kbd>${opts.hotkey}</kbd>` : '';
+    const lvBadge = opts.child
+      ? `<span class="fs-upg-lv-badge">${lv}</span>`
+      : '';
+    const chevron = expandable
+      ? `<button type="button" class="fs-upg-chevron ${expanded ? 'open' : ''}" data-expand="${u.id}" title="${expanded ? 'Collapse' : 'Expand'}">${expanded ? '▾' : '▸'}</button>`
+      : '';
+    const cls = [
+      'fs-upg-row',
+      maxed ? 'maxed' : '',
+      affordable ? 'affordable' : 'locked',
+      opts.child ? 'child' : '',
+      expandable ? 'expandable' : '',
+      expanded ? 'expanded' : '',
+    ].filter(Boolean).join(' ');
+    return `<div class="${cls}" data-up="${u.id}">
+      <div class="fs-upg-ico">${icon(u.id, 'camp')}${kbd}${lvBadge}</div>
+      <div class="fs-upg-body">
+        <div class="fs-upg-title"><span>${u.name}</span><span class="fs-upg-lv">${lv}/${u.max}</span></div>
+        <div class="fs-upg-desc">${u.desc}</div>
+        <div class="fs-upg-val">${valHtml}</div>
+      </div>
+      <div class="fs-upg-actions">
+        <button type="button" class="fs-upg-buy" data-up="${u.id}" ${affordable ? '' : 'disabled'}>${costHtml}</button>
+        ${chevron}
+      </div>
+    </div>`;
+  }
+
+  private renderBuildPanel(camp: CampSystem, player: RunPlayer, atCamp: boolean) {
+    const list = this.campPanelEl.querySelector('#camp-side-list');
+    if (!list) return;
+    // Auto-open Watchtower once when first built — never force it open again.
+    if ((camp.levels.towers || 0) > 0 && !this.buildAutoOpened.has('towers')) {
+      this.buildExpanded.add('towers');
+      this.buildAutoOpened.add('towers');
+    }
+    const parents = buildParentUpgrades();
+    const parts: string[] = [];
+    parents.forEach((u, i) => {
+      const kids = upgradeChildren(u.id);
+      const expanded = this.buildExpanded.has(u.id);
+      parts.push(this.renderUpgradeRow(u, camp, player, atCamp, { hotkey: i + 1 }));
+      if (kids.length && expanded) {
+        const label = u.id === 'towers' ? 'Tower Upgrades' : `${u.name} Upgrades`;
+        parts.push(`<div class="fs-upg-children" data-parent="${u.id}">
+          <div class="fs-upg-children-label">↑ ${label}</div>
+          ${kids.map((c) => this.renderUpgradeRow(c, camp, player, atCamp, { child: true })).join('')}
+        </div>`);
+      }
+    });
+    list.innerHTML = parts.join('');
+    list.querySelectorAll('.fs-upg-buy[data-up]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const id = (btn as HTMLElement).dataset.up!;
+        this.onUpgradeCamp?.(id);
+      });
+    });
+    list.querySelectorAll('.fs-upg-chevron[data-expand]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const id = (btn as HTMLElement).dataset.expand!;
+        if (this.buildExpanded.has(id)) this.buildExpanded.delete(id);
+        else this.buildExpanded.add(id);
+        this.campPanelCache = '';
+        this.refreshCampPanel(camp, player, atCamp);
+      });
+    });
   }
 
   private renderSmithPanel(camp: CampSystem, player: RunPlayer, atCamp: boolean) {
@@ -1529,7 +1633,13 @@ export class DomUI {
           ? 'Undead tint. On death, splits into 3 weaker fragments with reduced loot.'
           : id === 'demonic'
             ? 'Crimson spiked look. On death, leaves a large fire pool that burns you.'
-            : 'Standard forest wildlife — baseline stats.';
+            : id === 'armored'
+              ? 'Metallic plates. Takes ~28% less hit damage, moves slower, silver shine.'
+              : id === 'frenzied'
+                ? 'Hot-tempered. Below 40% HP, deals more damage and runs faster.'
+                : id === 'blessed'
+                  ? 'Golden halo. Pulses an inspiration aura that buffs nearby beasts.'
+                  : 'Standard forest wildlife — baseline stats.';
     // Same wolf body + in-game variant rim/spikes so the card matches combat art.
     const ico =
       animalIconHtml('wolf', id) ||
@@ -1838,7 +1948,7 @@ export class DomUI {
           name: 'Run mutators',
           tag: 'Challenge',
           icon: 'world_mutators',
-          desc: 'Toggle challenges on the main menu before a run: Savage (threat up, more credits), No Grace, Glass cannon, Siege assaults, or Scarcity loot. Stack freely; choices are saved.',
+          desc: 'Toggle challenges on the main menu before a run: Savage (threat up, more credits), No Grace, Glass cannon, Siege assaults, Scarcity loot, or Vanilla (no camp, XP-only, hunt the player). Stack freely; choices are saved.',
         }),
         this.glossarySimpleCard({
           name: 'Win goals',
@@ -1868,7 +1978,7 @@ export class DomUI {
           name: 'Status effects',
           tag: 'Combat',
           icon: 'world_status',
-          desc: 'Poison stacks DoT from nature attacks. Slow from gloom, vines, water spray, and similar. Burn pools (demonic deaths, fire trails, scorch) deal damage over time while you stand in them.',
+          desc: 'Poison and burn are separate DoTs (they never merge). Each ticks every 3s; reapplying the same type refreshes duration and keeps the stronger tick. Ooze and fire pools refresh their own type while you or beasts stand in them.',
         }),
         this.glossarySimpleCard({
           name: 'Coach tutorials',
@@ -2147,8 +2257,14 @@ export class DomUI {
     if (!def) return;
     const title = this.tutorialEl.querySelector('#tutorial-title');
     const body = this.tutorialEl.querySelector('#tutorial-body');
-    if (title) title.textContent = def.title;
-    if (body) body.innerHTML = def.body;
+    if (title) {
+      title.textContent =
+        this.noCampMode && def.titleNoCamp ? def.titleNoCamp : def.title;
+    }
+    if (body) {
+      body.innerHTML =
+        this.noCampMode && def.bodyNoCamp ? def.bodyNoCamp : def.body;
+    }
     this.coachTargetKey = def.target || null;
     this.tutorialEl.classList.remove('hidden');
     this.tutorialEl.classList.toggle('fs-coach-notarget', !def.target);
@@ -2473,6 +2589,7 @@ export class DomUI {
 
   /** Called when a run starts — show HUD camp panel. */
   beginRunHud() {
+    this.noCampMode = false;
     this.hideMainMenu();
     this.hideMeta();
     this.hideGameOver();
@@ -3097,8 +3214,10 @@ export class DomUI {
       ['Raids', String(player.raidsSurvived)],
       ['Bosses', String(player.bosses)],
       ['Dash charges', String(player.dashCharges)],
-      ['Camp HP', camp ? `${Math.ceil(camp.hp)} / ${camp.maxHp}` : '—'],
     ];
+    if (!this.noCampMode) {
+      runRows.push(['Camp HP', camp ? `${Math.ceil(camp.hp)} / ${camp.maxHp}` : '—']);
+    }
 
     const combatRows: [string, string][] = [
       ['Damage', pct(player.damageMult)],
@@ -3384,9 +3503,10 @@ export class DomUI {
       ['Wood collected', formatNum(stats.wood || 0)],
       ['Meat collected', formatNum(stats.meat || 0)],
       ['Gold collected', formatNum(stats.gold || 0)],
-      ['Camp level', stats.campLevel || 0],
-      ['Camp upgrades', stats.campUpgrades || 0],
     ];
+    if (!this.noCampMode) {
+      rows.push(['Camp level', stats.campLevel || 0], ['Camp upgrades', stats.campUpgrades || 0]);
+    }
     if (stats.winLabel) rows.unshift(['Goal', stats.winLabel]);
     if (stats.badge) rows.unshift(['Badge', stats.badge]);
     const wallet =

@@ -17,10 +17,12 @@ import { Audio } from '../audio/Audio';
 import type { RunPlayer } from '../run/RunTypes';
 import type { LevelUpCard } from '../data/passives';
 import { clamp, damp, formatNum, rand } from '../core/math';
+import { tickDots } from '../core/dot';
 import { cameraZoom, cameraWorldBounds } from '../core/renderScale';
 import {
   threatAt,
   UPGRADES,
+  buildParentUpgrades,
   isBossNight,
   ELEMENTS,
   upgradeCost,
@@ -220,6 +222,7 @@ export class RunScene extends Phaser.Scene {
     }
     // New procedural layout every run (ground layer follows world.seed).
     this.world = new World(snap?.worldSeed);
+    if (this.mutatorFx.xpOnlyLoot) this.world.setPoiExclude(['vein']);
     // World entities Y-sort via child depth; FX (projectiles, float text) stay above.
     this.worldLayer = this.add.container(0, 0).setDepth(0);
     this.fxLayer = this.add.container(0, 0).setDepth(10);
@@ -269,6 +272,7 @@ export class RunScene extends Phaser.Scene {
       slow: 0,
       slowT: 0,
       poisons: [],
+      burns: [],
       magnetR: 90,
       damageMult: 1,
       flatDamage: 0,
@@ -292,9 +296,8 @@ export class RunScene extends Phaser.Scene {
       buffVital: 0,
       buffHaste: 0,
       buffHearts: 0,
-      poisonAcc: 0,
-      burnAcc: 0,
       burnT: 0,
+      burnPoolCd: 0,
     };
     this.arsenal.achievements = [...meta.achievements];
     this.arsenal.addWeapon('axe', 1);
@@ -331,6 +334,12 @@ export class RunScene extends Phaser.Scene {
       bonuses,
     );
     this.combat.lootMult = this.mutatorFx.lootMult;
+    this.combat.xpOnlyLoot = this.mutatorFx.xpOnlyLoot;
+    if (this.mutatorFx.xpOnlyLoot) {
+      for (const r of this.world.rocks) {
+        if (r.ore) r.invulnerable = true;
+      }
+    }
     this.combat.onStaticKilled = (s) => {
       // Trees keep a stump and regrow — don't destroy the sprite entry.
       if (s.type === 'tree') return;
@@ -349,8 +358,12 @@ export class RunScene extends Phaser.Scene {
     this.camp.shopStockMult = this.mutatorFx.shopCountMult;
     this.camp.winGoalNights = winGoalNights(this.winGoal);
     if (this.mutatorFx.shopCountMult !== 1) this.camp.restockShop(true);
+    if (this.mutatorFx.noCamp) this.camp.enableNoCamp();
     this.animals.setCamp(this.camp);
     this.animals.spawnBlocked = (x, y) => this.camp.spawnInBase(x, y, 48);
+    this.animals.huntPlayerOnly = this.mutatorFx.huntPlayerOnly;
+    this.animals.xpOnlyLoot = this.mutatorFx.xpOnlyLoot;
+    this.animals.enemyDmgMult = this.mutatorFx.enemyDmgMult;
 
     this.floatText = new FloatingTextSystem(this, this.fxLayer);
     this.vfx = new FxSystem(this, this.fxLayer);
@@ -390,16 +403,21 @@ export class RunScene extends Phaser.Scene {
     this.ui.beginRunHud();
     this.combat.onPowerupBanner = (title, sub, color, iconId) =>
       this.ui.banner(title, sub, color, iconId ? { iconId } : undefined);
-    this.camp.onCampAttack = () =>
+    this.camp.onCampAttack = () => {
+      if (this.mutatorFx.noCamp) return;
       this.ui.banner('The camp is under attack!', 'Defend the cabin or the run is over.', '#ff6b6b', {
         iconId: 'house',
       });
-    this.camp.onStructureHit = () => this.ui.flashCampHurt();
+    };
+    this.camp.onStructureHit = () => {
+      if (!this.mutatorFx.noCamp) this.ui.flashCampHurt();
+    };
     this.camp.onRaidStart = (day, count, directions, speciesHint, topSpecies) => {
       const goalN = winGoalNights(this.winGoal);
       const gauntlet = goalN > 0 && day === goalN;
       const species = speciesHint ? ` · ${speciesHint}` : '';
       const pills = this.ui.speciesPillsHtml(topSpecies || []);
+      const solo = this.mutatorFx.huntPlayerOnly;
       this.ui.banner(
         gauntlet ? `Night ${day}: FINAL GAUNTLET!` : `Night ${day}: RAID!`,
         `${count} beasts from the ${directions}${species}`,
@@ -409,7 +427,13 @@ export class RunScene extends Phaser.Scene {
           subHtml: `${count} beasts from the ${directions}${species}${pills ? ` ${pills}` : ''}`,
         },
       );
-      this.ui.setTip(gauntlet ? 'Final gauntlet — survive to win!' : 'Night raid — defend the camp!');
+      this.ui.setTip(
+        gauntlet
+          ? 'Final gauntlet — survive to win!'
+          : solo
+            ? 'Night raid — they hunt you!'
+            : 'Night raid — defend the camp!',
+      );
     };
     this.camp.onTrueBossSpawn = (name, moves) => {
       const ids = moves.filter((id): id is BossAbilityId => !!id) as BossAbilityId[];
@@ -440,30 +464,38 @@ export class RunScene extends Phaser.Scene {
           iconId: 'true_boss',
         });
       } else {
+        const solo = this.mutatorFx.huntPlayerOnly;
         this.ui.banner(
           day >= 7 ? 'Twin minibosses!' : 'Miniboss incoming!',
-          'Elite guards hunt you and the camp.',
+          solo ? 'Elite guards hunt you.' : 'Elite guards hunt you and the camp.',
           '#c46bff',
           { iconId: 'world_champions' },
         );
       }
     };
     this.animals.onDayBoss = (name) => {
-      this.ui.banner(`${name}!`, 'Elite guards hunt you and your camp.', '#c46bff', {
-        iconId: 'world_champions',
-      });
-      this.ui.setTip(`${name} and guards hunt the camp!`);
+      const solo = this.mutatorFx.huntPlayerOnly;
+      this.ui.banner(
+        `${name}!`,
+        solo ? 'Elite guards hunt you.' : 'Elite guards hunt you and your camp.',
+        '#c46bff',
+        { iconId: 'world_champions' },
+      );
+      this.ui.setTip(solo ? `${name} and guards hunt you!` : `${name} and guards hunt the camp!`);
     };
     this.wireUi();
     this.ui.threatHudMult = this.mutatorFx.threatMult;
     this.ui.setActiveMutators(this.mutators);
+    this.ui.setNoCampMode(this.mutatorFx.noCamp);
     this.ui.refreshCampPanel(this.camp, this.player, this.camp.contains(this.player.x, this.player.y, 30));
 
     if (snap) {
       this.applyRunSnapshot(snap);
       this.ui.banner(
         `Day ${this.dayNight.dayNumber}`,
-        'Checkpoint restored — keep the camp standing.',
+        this.mutatorFx.noCamp
+          ? 'Checkpoint restored — stay alive.'
+          : 'Checkpoint restored — keep the camp standing.',
         '#7fd3ff',
       );
       this.day1BannerShown = true;
@@ -478,7 +510,10 @@ export class RunScene extends Phaser.Scene {
         goal.nights > 0
           ? ` Win goal: ${goal.name} (${goal.nights} nights).`
           : '';
-      this.ui.banner('Day 1', `Chop, hunt, fortify. ${graceNote}${goalNote}`, '#ffe08a', {
+      const openLine = this.mutatorFx.noCamp
+        ? `Hunt and survive. ${graceNote}${goalNote}`
+        : `Chop, hunt, fortify. ${graceNote}${goalNote}`;
+      this.ui.banner('Day 1', openLine, '#ffe08a', {
         iconId: this.graceLeft > 0 ? 'world_grace' : 'sun',
       });
       this.day1BannerShown = true;
@@ -773,14 +808,45 @@ export class RunScene extends Phaser.Scene {
     if (this.camp.tryUpgrade(id, this.player)) {
       this.player.campUpgrades++;
       const def = UPGRADES.find((u) => u.id === id);
-      this.floatText.spawn(
-        this.player.x,
-        this.player.y - 74,
-        `${def?.name || id} ${this.camp.levels[id]}!`,
-        '#9ef08a',
-        22,
-        { life: 1.3, vy: -36 },
-      );
+      const riskWarn: Record<string, { title: string; sub: string; color: string }> = {
+        predators_bait: {
+          title: "Predator's Bait — RISK ACCEPTED",
+          sub: 'Richer XP… but the forest hunts you harder. Beasts are faster and hungrier.',
+          color: '#ff6b6b',
+        },
+        forest_beckons: {
+          title: 'The Forest Beckons — RISK ACCEPTED',
+          sub: 'Power surges through you… every minute, a stronger wave answers the call.',
+          color: '#ff8a3d',
+        },
+        cursed_totem: {
+          title: 'Cursed Totem — RISK ACCEPTED',
+          sub: 'Loot overflows… but the dead leave poison shrines that slow and sicken.',
+          color: '#9b7bde',
+        },
+      };
+      const risk = riskWarn[id];
+      if (risk) {
+        this.ui.banner(risk.title, risk.sub, risk.color, { iconId: id });
+        this.floatText.spawn(
+          this.player.x,
+          this.player.y - 74,
+          `${def?.name || id}!`,
+          risk.color,
+          22,
+          { life: 1.5, vy: -36 },
+        );
+        Audio.playSfx('howl', 0.85);
+      } else {
+        this.floatText.spawn(
+          this.player.x,
+          this.player.y - 74,
+          `${def?.name || id} ${this.camp.levels[id]}!`,
+          '#9ef08a',
+          22,
+          { life: 1.3, vy: -36 },
+        );
+      }
       this.ui.invalidateCampPanel();
       this.ui.refreshCampPanel(this.camp, this.player, true);
       if (id === 'blacksmith' && prevSmith === 0) this.offerTutorial('smith');
@@ -870,6 +936,13 @@ export class RunScene extends Phaser.Scene {
     if (this.tutorialsShownThisRun.has(id)) return false;
     if (!COACH_STEPS[id]) return false;
     if (!this.player.alive) return false;
+    // Vanilla has no camp / resources HUD — skip fortify / smith / resources coach.
+    if (
+      this.mutatorFx.noCamp &&
+      (id === 'build' || id === 'smith' || id === 'resources')
+    ) {
+      return false;
+    }
     if (this.tutorialOpen || this.ui.isTutorialOpen()) {
       if (!this.tutorialQueue.includes(id)) this.tutorialQueue.push(id);
       return false;
@@ -883,7 +956,10 @@ export class RunScene extends Phaser.Scene {
       this.tutorialSilentPause = false;
     }
     const def = COACH_STEPS[id];
-    if (def.prepare === 'camp' || def.prepare === 'smith') {
+    if (
+      !this.mutatorFx.noCamp &&
+      (def.prepare === 'camp' || def.prepare === 'smith')
+    ) {
       this.ui.setCampPanelOpen(true);
       this.ui.setCampSmithTab(def.prepare === 'smith');
       this.ui.refreshCampPanel(
@@ -1106,31 +1182,38 @@ export class RunScene extends Phaser.Scene {
       threat.m,
       this.graceLeft,
       () => {
-        this.ui.setTip('Night raid — defend the camp!');
+        this.ui.setTip(
+          this.mutatorFx.huntPlayerOnly
+            ? 'Night raid — they hunt you!'
+            : 'Night raid — defend the camp!',
+        );
       },
     );
-    this.assault.update(
-      dt,
-      this.animals,
-      this.camp.x,
-      this.camp.y,
-      this.world.w,
-      this.world.h,
-      threat.m,
-      threat.hp,
-      this.dayNight.isNight,
-      // Hold daytime assaults while a night raid is active (legacy raid.active).
-      this.camp.raidActive,
-      // Hold assaults during start-of-run grace.
-      this.graceLeft,
-      (title, sub, color, topSpecies) => {
-        const pills = this.ui.speciesPillsHtml(topSpecies || []);
-        this.ui.banner(title, sub, color, {
-          iconId: 'world_assaults',
-          ...(pills ? { subHtml: `${sub} ${pills}` } : {}),
-        });
-      },
-    );
+    {
+      const focus = this.camp.raidFocus(this.player);
+      this.assault.update(
+        dt,
+        this.animals,
+        focus.x,
+        focus.y,
+        this.world.w,
+        this.world.h,
+        threat.m,
+        threat.hp,
+        this.dayNight.isNight,
+        // Hold daytime assaults while a night raid is active (legacy raid.active).
+        this.camp.raidActive,
+        // Hold assaults during start-of-run grace.
+        this.graceLeft,
+        (title, sub, color, topSpecies) => {
+          const pills = this.ui.speciesPillsHtml(topSpecies || []);
+          this.ui.banner(title, sub, color, {
+            iconId: 'world_assaults',
+            ...(pills ? { subHtml: `${sub} ${pills}` } : {}),
+          });
+        },
+      );
+    }
     this.animals.update(
       dt,
       this.player,
@@ -1178,6 +1261,7 @@ export class RunScene extends Phaser.Scene {
       this.player.x,
       this.player.y,
       this.animals.animals,
+      !this.mutatorFx.noCamp,
     );
     this.ui.updateHud(this.player, this.dayNight, this.camp, this.arsenal, dt);
     this.ui.updateEventHud(this.graceLeft);
@@ -1192,7 +1276,7 @@ export class RunScene extends Phaser.Scene {
       this.shake(0.7);
       this.endRun(true);
     }
-    if (this.camp.hp <= 0) {
+    if (!this.mutatorFx.noCamp && this.camp.hp <= 0) {
       this.shake(0.8);
       this.ui.banner('Camp destroyed!', 'The cabin has fallen.', '#ff6b6b');
       this.player.alive = false;
@@ -1281,6 +1365,7 @@ export class RunScene extends Phaser.Scene {
       this.tryInteractPoi();
     }
     if (
+      !this.mutatorFx.noCamp &&
       (Phaser.Input.Keyboard.JustDown(this.keys.B) || Phaser.Input.Keyboard.JustDown(this.keys.U)) &&
       this.player.alive &&
       !this.levelUpOpen &&
@@ -1314,9 +1399,10 @@ export class RunScene extends Phaser.Scene {
         this.keys.ONE, this.keys.TWO, this.keys.THREE, this.keys.FOUR, this.keys.FIVE,
         this.keys.SIX, this.keys.SEVEN, this.keys.EIGHT, this.keys.NINE,
       ];
+      const parents = buildParentUpgrades();
       for (let i = 0; i < upgKeys.length; i++) {
-        if (Phaser.Input.Keyboard.JustDown(upgKeys[i]) && UPGRADES[i]) {
-          this.tryCampUpgrade(UPGRADES[i].id);
+        if (Phaser.Input.Keyboard.JustDown(upgKeys[i]) && parents[i]) {
+          this.tryCampUpgrade(parents[i].id);
         }
       }
     }
@@ -1334,9 +1420,18 @@ export class RunScene extends Phaser.Scene {
       this.camp.onDawn();
       if (survived) this.animals.retreatRaiders();
       if (reward) {
-        this.ui.banner('Raid repelled!', `Reward: +${reward.wood} wood, +${reward.gold} gold`, '#9ef08a', {
-          iconId: 'world_raids',
-        });
+        if (this.mutatorFx.xpOnlyLoot) {
+          const wave = nightJustCleared || 1;
+          const xp = 20 + 12 * wave;
+          this.combat.spawnPickup('xp', this.player.x, this.player.y - 20, xp);
+          this.ui.banner('Night survived!', `+${xp} XP`, '#9ef08a', {
+            iconId: 'world_raids',
+          });
+        } else {
+          this.ui.banner('Raid repelled!', `Reward: +${reward.wood} wood, +${reward.gold} gold`, '#9ef08a', {
+            iconId: 'world_raids',
+          });
+        }
         this.checkRaidAchievements();
       }
       const goalN = winGoalNights(this.winGoal);
@@ -1347,12 +1442,19 @@ export class RunScene extends Phaser.Scene {
       }
       if (dayEvt.newDay && this.dayNight.dayNumber > 1 && !this.won) {
         this.reshuffleForestLandmarks();
-        const intro = survived
-          ? 'Raiders retreat. '
-          : 'Camp repaired. ';
+        const intro = this.mutatorFx.noCamp
+          ? survived
+            ? 'You survived the night. '
+            : ''
+          : survived
+            ? 'Raiders retreat. '
+            : 'Camp repaired. ';
+        const landmarks = this.mutatorFx.xpOnlyLoot
+          ? 'dens, wagons & shrines move'
+          : 'dens, wagons, shrines & veins move';
         this.ui.banner(
           'The forest has shifted',
-          `Day ${this.dayNight.dayNumber} — dens, wagons, shrines & veins move. ${intro}Threat x${threat.hp.toFixed(1)}.`,
+          `Day ${this.dayNight.dayNumber} — ${landmarks}. ${intro}Threat x${threat.hp.toFixed(1)}.`,
           '#a8e6ff',
         );
       }
@@ -1363,17 +1465,22 @@ export class RunScene extends Phaser.Scene {
       this.camp.prepareRaidFronts(day);
       const dirs = this.camp.raidDirections();
       Audio.playSfx('horn');
+      const solo = this.mutatorFx.huntPlayerOnly;
       if (isBossNight(day)) {
         this.ui.banner(
           'Boss night approaches!',
-          `A true boss leads the raid from the ${dirs}. Fortify the camp!`,
+          solo
+            ? `A true boss leads the raid from the ${dirs}. Survive!`
+            : `A true boss leads the raid from the ${dirs}. Fortify the camp!`,
           '#ff4d6d',
           { iconId: 'true_boss' },
         );
       } else {
         this.ui.banner(
           'Dusk falls...',
-          `Raiders gather to the ${dirs}. Get back to camp!`,
+          solo
+            ? `Raiders gather to the ${dirs}. They hunt you!`
+            : `Raiders gather to the ${dirs}. Get back to camp!`,
           '#ffb36b',
           { iconId: 'world_daynight' },
         );
@@ -1383,7 +1490,13 @@ export class RunScene extends Phaser.Scene {
     }
     if (dayEvt.enteredNight) {
       Audio.playSfx('howl');
-      this.camp.startNightRaid(this.dayNight.dayNumber, this.animals, threat.m, this.graceLeft);
+      this.camp.startNightRaid(
+        this.dayNight.dayNumber,
+        this.animals,
+        threat.m,
+        this.graceLeft,
+        this.player,
+      );
       this.checkpointSave();
     }
   }
@@ -1486,40 +1599,41 @@ export class RunScene extends Phaser.Scene {
       p.slowT = Math.max(0, p.slowT - dt);
       if (p.slowT <= 0) p.slow = 0;
     }
-    if (p.poisons.length) {
-      let poisonDmg = 0;
-      for (let i = p.poisons.length - 1; i >= 0; i--) {
-        const b = p.poisons[i];
-        b.life -= dt;
-        poisonDmg += b.dps * dt;
-        if (b.life <= 0) p.poisons.splice(i, 1);
+    {
+      const poisonTick = p.poisons.length ? tickDots(p.poisons, dt) : 0;
+      const burnTick = p.burns.length ? tickDots(p.burns, dt) : 0;
+      if (poisonTick > 0 && p.alive) {
+        p.hp -= poisonTick;
+        this.floatText.spawn(
+          p.x + (Math.random() * 16 - 8),
+          p.y - 36,
+          String(Math.round(poisonTick)),
+          '#6dd46a',
+          13,
+          { life: 0.55, vy: -24 },
+        );
+        this.vfx?.sparks(p.x, p.y - 8, 4, '#6dd46a');
+        Audio.playSfx('hurt', 0.55);
       }
-      if (poisonDmg > 0 && p.alive) {
-        // Legacy: accumulate to whole-number ticks so the player sees green damage pops.
-        p.poisonAcc = (p.poisonAcc || 0) + poisonDmg;
-        if (p.poisonAcc >= 1) {
-          const tick = Math.floor(p.poisonAcc);
-          p.poisonAcc -= tick;
-          p.hp -= tick;
-          this.floatText.spawn(
-            p.x + (Math.random() * 16 - 8),
-            p.y - 36,
-            String(tick),
-            '#6dd46a',
-            13,
-            { life: 0.55, vy: -24 },
-          );
-          this.vfx?.sparks(p.x, p.y - 8, 4, '#6dd46a');
-          if (Math.random() < 0.35) Audio.playSfx('hurt', 0.55);
-          if (p.hp <= 0) {
-            p.hp = 0;
-            p.alive = false;
-            Audio.playSfx('death');
-          }
-        }
+      if (burnTick > 0 && p.alive) {
+        p.hp -= burnTick;
+        p.burnT = Math.max(p.burnT || 0, 0.55);
+        this.floatText.spawn(
+          p.x + (Math.random() * 16 - 8),
+          p.y - 34,
+          String(Math.round(burnTick)),
+          '#ff8a3d',
+          13,
+          { life: 0.5, vy: -22 },
+        );
+        this.vfx?.sparks(p.x, p.y - 6, 3, '#ff8a3d');
+        Audio.playSfx('hurt', 0.5);
       }
-    } else {
-      p.poisonAcc = 0;
+      if ((poisonTick > 0 || burnTick > 0) && p.hp <= 0 && p.alive) {
+        p.hp = 0;
+        p.alive = false;
+        Audio.playSfx('death');
+      }
     }
 
     // moveMult already includes Wind Tonic (×1.65) via applyBuffMultipliers.
@@ -1573,7 +1687,7 @@ export class RunScene extends Phaser.Scene {
     const hpQ = Math.round((p.hp / Math.max(1, p.maxHp)) * 20);
     const dashQ = Math.round(p.dashCharges * 4) + (p.dashCd > 0 ? Math.ceil(p.dashCd * 4) : 0);
     const poisoned = p.poisons.length > 0;
-    const burning = (p.burnT || 0) > 0;
+    const burning = p.burns.length > 0 || (p.burnT || 0) > 0;
     const slowed = p.slowT > 0 && p.slow > 0.05;
     const key = `${this.playerFacing}|${walkFrame}|${flashQ}|${invQ}|${hpQ}|${dashQ}|${poisoned ? 1 : 0}|${burning ? 1 : 0}|${slowed ? 1 : 0}|${p.alive ? 1 : 0}`;
     if (key === this.playerDrawKey) return;
@@ -1940,13 +2054,19 @@ export class RunScene extends Phaser.Scene {
       Audio.playSfx('howl');
       this.vfx.sparks(poi.x, poi.y, 16, def.color);
     } else if (poi.kind === 'wagon') {
-      this.combat.spawnPickup('wood', poi.x, poi.y, 18 + Math.floor(p.level * 1.5));
-      this.combat.spawnPickup('meat', poi.x + 10, poi.y, 10 + Math.floor(p.level));
-      this.combat.spawnPickup('gold', poi.x - 10, poi.y, 8 + Math.floor(p.level * 0.8));
-      if (Math.random() < 0.45) {
-        this.combat.spawnPickup('powerup', poi.x, poi.y + 8, 1, 'haste');
+      if (this.mutatorFx.xpOnlyLoot) {
+        const xp = 28 + Math.floor(p.level * 4);
+        this.combat.spawnPickup('xp', poi.x, poi.y, xp);
+        this.ui.banner(def.name, `+${xp} XP`, def.color);
+      } else {
+        this.combat.spawnPickup('wood', poi.x, poi.y, 18 + Math.floor(p.level * 1.5));
+        this.combat.spawnPickup('meat', poi.x + 10, poi.y, 10 + Math.floor(p.level));
+        this.combat.spawnPickup('gold', poi.x - 10, poi.y, 8 + Math.floor(p.level * 0.8));
+        if (Math.random() < 0.45) {
+          this.combat.spawnPickup('powerup', poi.x, poi.y + 8, 1, 'haste');
+        }
+        this.ui.banner(def.name, 'Supplies scattered!', def.color);
       }
-      this.ui.banner(def.name, 'Supplies scattered!', def.color);
       Audio.playSfx('gold');
       this.vfx.sparkle(poi.x, poi.y, def.color);
     } else if (poi.kind === 'shrine') {
@@ -2138,7 +2258,7 @@ export class RunScene extends Phaser.Scene {
 
   /** Persist a mid-run checkpoint (dusk/dawn/pause/periodic). */
   checkpointSave() {
-    if (this.won || !this.player?.alive || this.camp.hp <= 0) return;
+    if (this.won || !this.player?.alive || (!this.mutatorFx.noCamp && this.camp.hp <= 0)) return;
     try {
       saveRunSnapshot(this.buildRunSnapshot());
     } catch {
@@ -2265,6 +2385,8 @@ export class RunScene extends Phaser.Scene {
         else s.clearTint();
       }
     }
+    // Vanilla saves still carry camp fields — strip the base again after restore.
+    if (this.mutatorFx.noCamp) this.camp.enableNoCamp();
     this.poiSprites.forEach((s) => s.destroy());
     this.poiSprites.clear();
     this.poiPrompt?.setVisible(false);

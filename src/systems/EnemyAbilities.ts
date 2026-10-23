@@ -1,10 +1,14 @@
 /**
  * Elemental specials + boss moves.
  * Each element has a pool of abilities; higher veterancy (stars) unlocks more.
- * Telegraph → act, with ground hazards for spikes / vines / burn trails.
+ * Telegraph → commit (locked aim) → act, with ground hazards for spikes / vines / burn trails.
  */
+
+/** Pause after telegraph fills before the hit — gives the player a dodge window. */
+export const ABILITY_COMMIT = 0.5;
 import Phaser from 'phaser';
 import { clamp, damp, dist2, lerp, rand, TAU, compactInPlace } from '../core/math';
+import { applyDot, DOT_INTERVAL } from '../core/dot';
 import type { ElementId } from '../data/constants';
 import type { RunPlayer } from '../run/RunTypes';
 import type { AnimalEntity } from './AnimalSystem';
@@ -12,7 +16,7 @@ import type { FxSystem } from './FxSystem';
 import { CanvasSprite } from '../art/draw/CanvasSprite';
 import { drawEnemyBolt, enemyBoltCanvasSize } from '../art/draw/enemyBoltDraw';
 import { Audio } from '../audio/Audio';
-import { isBearish } from '../data/animals';
+import { frenzyMul, isBearish } from '../data/animals';
 
 export type ElemAbilityDef = {
   id: string;
@@ -90,7 +94,7 @@ export const ELEMENT_ABILITY_POOLS: Record<ElementId, readonly ElemAbilityDef[]>
   ],
   earth: [
     {
-      id: 'elem_spikes', name: 'Stone Spikes', desc: 'Warns several ground spots, then spikes erupt for heavy hits.', cd: 6.8, tele: 2.0, count: 3, radius: 34,
+      id: 'elem_spikes', name: 'Stone Spikes', desc: 'Warns several ground spots, then spikes erupt for heavy hits.', cd: 6.8, tele: 2.0, count: 3, radius: 54,
       dmgMul: 1.15, range: 270, color: '#c4a35a',
     },
     {
@@ -195,7 +199,7 @@ export const BOSS_ABILITY = {
   boss_meteor: {
     name: 'Skyfall',
     desc: 'Calls down several delayed ground eruptions around you.',
-    tele: 1.8, count: 5, radius: 42, dmgMul: 1.35, range: 320, cd: 13, color: '#ff9a4a',
+    tele: 1.8, count: 5, radius: 58, dmgMul: 1.35, range: 320, cd: 13, color: '#ff9a4a',
   },
   boss_beam: {
     name: 'Ruin Beam',
@@ -215,7 +219,8 @@ export type BossAbilityId = keyof typeof BOSS_ABILITY;
 
 export type AnimalAbility = {
   id: string;
-  phase: 'tele' | 'act';
+  /** tele = charging/aiming; commit = locked telegraph; act = resolving. */
+  phase: 'tele' | 'commit' | 'act';
   t: number;
   dur: number;
   color: string;
@@ -249,7 +254,7 @@ export type AnimalAbility = {
 };
 
 export type Hazard = {
-  type: 'spikes' | 'burn' | 'vines';
+  type: 'spikes' | 'burn' | 'vines' | 'totem';
   x: number;
   y: number;
   r: number;
@@ -264,7 +269,11 @@ export type Hazard = {
   dead: boolean;
   slow?: number;
   slowT?: number;
+  /** Poison DoT applied while standing in a cursed totem aura. */
+  poisonDps?: number;
+  poisonT?: number;
   _acc?: number;
+  _poisonCd?: number;
 };
 
 export type EnemyBoltShot = {
@@ -339,7 +348,8 @@ export function initAnimalAbilities(a: AnimalEntity, opts: { trueBoss?: boolean;
 }
 
 export function animalEffectiveDamage(a: AnimalEntity) {
-  return Math.max(1, Math.round(a.dmg * (a.inspireMul || 1)));
+  // Frenzied ramps damage at low HP; inspireMul covers blessed / boss auras.
+  return Math.max(1, Math.round(a.dmg * (a.inspireMul || 1) * frenzyMul(a, 'dmg')));
 }
 
 export function applyPlayerSlow(player: RunPlayer, amount: number, dur: number) {
@@ -348,8 +358,8 @@ export function applyPlayerSlow(player: RunPlayer, amount: number, dur: number) 
 }
 
 export function applyPlayerPoison(player: RunPlayer, dps: number, life: number) {
-  player.poisons.push({ dps, life });
-  if (player.poisons.length > 8) player.poisons.splice(0, player.poisons.length - 8);
+  // Convert legacy DPS into per-tick damage (one tick ≈ DOT_INTERVAL seconds of old DPS).
+  applyDot(player.poisons, dps * DOT_INTERVAL, life);
 }
 
 function finishAbility(a: AnimalEntity, id: string) {
@@ -376,7 +386,8 @@ function hurt(
   onFloat?: (x: number, y: number, msg: string, color?: string, size?: number) => void,
 ) {
   if (!player.alive || player.invuln > 0) return;
-  const dealt = amount * (1 - clamp(player.armor, 0, 0.65));
+  let dealt = amount * (1 - clamp(player.armor, 0, 0.65));
+  dealt *= 1 - clamp((player.buildArmorDr || 0) + (player.guardianDr || 0), 0, 0.65);
   player.hp -= dealt;
   player.invuln = 0.35;
   Audio.playSfx('hurt');
@@ -556,8 +567,8 @@ function beginAbility(
     const hazType = id === 'elem_vines' ? 'vines' : 'spikes';
     for (const s of spots) {
       hazards.push({
-        type: hazType, x: s.x, y: s.y, r: def.radius!, delay: def.tele,
-        life: def.tele + 0.7, age: 0, dmg: Math.round(animalEffectiveDamage(a) * def.dmgMul),
+        type: hazType, x: s.x, y: s.y, r: def.radius!, delay: def.tele + ABILITY_COMMIT,
+        life: def.tele + ABILITY_COMMIT + 0.7, age: 0, dmg: Math.round(animalEffectiveDamage(a) * def.dmgMul),
         dps: 0, element: id === 'elem_vines' ? 'nature' : 'earth', color: def.color,
         hit: false, dead: false, slow: def.slow, slowT: def.slowT,
       });
@@ -723,8 +734,8 @@ function beginAbility(
     a.state = 'ability';
     for (const s of spots) {
       hazards.push({
-        type: 'spikes', x: s.x, y: s.y, r: def.radius, delay: def.tele,
-        life: def.tele + 0.85, age: 0, dmg: Math.round(animalEffectiveDamage(a) * def.dmgMul),
+        type: 'spikes', x: s.x, y: s.y, r: def.radius, delay: def.tele + ABILITY_COMMIT,
+        life: def.tele + ABILITY_COMMIT + 0.85, age: 0, dmg: Math.round(animalEffectiveDamage(a) * def.dmgMul),
         dps: 0, element: null, color: def.color, hit: false, dead: false,
       });
     }
@@ -801,7 +812,16 @@ export function updateAnimalAbility(
     }
 
     if (ab.t > 0) return [0, 0];
+    // Telegraph full — lock aim for a beat so the player can step out.
+    ab.phase = 'commit';
+    ab.t = ABILITY_COMMIT;
+    ab.dur = ABILITY_COMMIT;
+    return [0, 0];
+  }
 
+  if (ab.phase === 'commit') {
+    if (ab.t > 0) return [0, 0];
+    // Commit done — resolve the ability (instant hit or start a sustained act).
     ab.phase = 'act';
     if (ab.id === 'elem_charge' || ab.id === 'boss_charge') {
       ab.t = ab.active || 0.5;
@@ -1255,6 +1275,16 @@ export function updateHazards(
           hurt(player, d, onHurt, onFloat);
         }
       }
+    } else if (h.type === 'totem') {
+      if (dist2(h.x, h.y, player.x, player.y) < (h.r + 8) ** 2) {
+        if (h.slow) applyPlayerSlow(player, h.slow, h.slowT || 0.6);
+        h._poisonCd = (h._poisonCd || 0) - dt;
+        if ((h.poisonDps || 0) > 0 && (h._poisonCd || 0) <= 0) {
+          h._poisonCd = 1.2;
+          applyPlayerPoison(player, h.poisonDps || 4, h.poisonT || 4);
+          fx?.sparks(player.x, player.y - 10, 4, h.color);
+        }
+      }
     }
   }
   compactInPlace(hazards, (h) => h.dead);
@@ -1270,22 +1300,25 @@ export function drawAbilityOverlays(
   for (const a of animals) {
     if (a.dead || !a.ability) continue;
     const ab = a.ability;
-    const progress = 1 - clamp(ab.t / Math.max(0.01, ab.dur), 0, 1);
     const col = Phaser.Display.Color.HexStringToColor(ab.color || '#fff').color;
-    if (ab.phase !== 'tele') {
+    if (ab.phase === 'act') {
       if (a.inspireT > 0) {
         g.lineStyle(2, 0xffe66d, 0.25);
         g.strokeEllipse(a.x, a.y, a.radius * 4.4, a.radius * 1.8);
       }
       continue;
     }
+    // Full during commit (locked telegraph); fills during tele.
+    const progress =
+      ab.phase === 'commit' ? 1 : 1 - clamp(ab.t / Math.max(0.01, ab.dur), 0, 1);
+    const pulse = ab.phase === 'commit' ? 0.12 + Math.abs(Math.sin(ab.t * 14)) * 0.18 : 0;
     if (ab.id === 'elem_charge' || ab.id === 'boss_charge' || ab.id === 'boss_fireground') {
       const len = ab.pathLen || (ab.id === 'boss_fireground' ? 220 : 280);
       const x2 = a.x + (ab.tx || 0) * len;
       const y2 = a.y + (ab.ty || 0) * len;
-      g.lineStyle(10 + progress * 8, col, 0.35 + progress * 0.45);
+      g.lineStyle(10 + progress * 8, col, 0.35 + progress * 0.45 + pulse);
       g.lineBetween(a.x, a.y, x2, y2);
-      g.lineStyle(2, col, 0.7);
+      g.lineStyle(2, col, 0.7 + pulse);
       g.lineBetween(a.x, a.y, x2, y2);
     } else if (
       ab.id === 'elem_bolt' ||
@@ -1296,9 +1329,9 @@ export function drawAbilityOverlays(
     ) {
       const ang = ab.ang || 0;
       const len = ab.id === 'elem_torrent' || ab.id === 'boss_volley' ? 70 : 80;
-      g.lineStyle(3, col, 0.5 + progress * 0.4);
+      g.lineStyle(3, col, 0.5 + progress * 0.4 + pulse);
       g.lineBetween(a.x, a.y - 8, a.x + Math.cos(ang) * len, a.y + Math.sin(ang) * len - 8);
-      g.fillStyle(col, 0.7);
+      g.fillStyle(col, 0.7 + pulse);
       g.fillCircle(a.x + Math.cos(ang) * 28, a.y + Math.sin(ang) * 28 - 8, 6 + progress * 4);
       if (ab.id === 'elem_torrent' || ab.id === 'boss_volley') {
         const spreads = ab.id === 'boss_volley' ? [-0.44, -0.22, 0.22, 0.44] : [-0.28, 0.28];
@@ -1315,15 +1348,15 @@ export function drawAbilityOverlays(
     } else if (ab.id === 'elem_poison' || ab.id === 'elem_scorch') {
       const r0 = ab.id === 'elem_scorch' ? ab.groundR || 40 : ab.splash || 48;
       const r = r0 * progress;
-      g.lineStyle(2.5, col, 0.3 + progress * 0.4);
+      g.lineStyle(2.5, col, 0.3 + progress * 0.4 + pulse);
       g.strokeEllipse(ab.tx || a.x, ab.ty || a.y, r0 * 2, r0 * 1.4);
-      g.fillStyle(col, 0.15 + progress * 0.2);
+      g.fillStyle(col, 0.15 + progress * 0.2 + pulse);
       g.fillEllipse(ab.tx || a.x, ab.ty || a.y, r * 2, r * 1.4);
     } else if (ab.id === 'elem_shadowstep' || ab.id === 'boss_leap') {
       const r0 = ab.id === 'boss_leap' ? ab.radius || 78 : 36;
-      g.lineStyle(2.5, col, 0.4 + progress * 0.4);
+      g.lineStyle(2.5, col, 0.4 + progress * 0.4 + pulse);
       g.strokeEllipse(ab.tx || a.x, ab.ty || a.y, r0 * 2, r0 * 1.35);
-      g.fillStyle(col, 0.12 + progress * 0.22);
+      g.fillStyle(col, 0.12 + progress * 0.22 + pulse);
       g.fillEllipse(ab.tx || a.x, ab.ty || a.y, r0 * 2 * progress, r0 * 1.35 * progress);
     } else if (
       ab.id === 'elem_nova' ||
@@ -1337,9 +1370,9 @@ export function drawAbilityOverlays(
       ab.id === 'boss_howl'
     ) {
       const r = (ab.radius || 100) * (0.35 + progress * 0.65);
-      g.lineStyle(3, col, 0.3 + progress * 0.35);
+      g.lineStyle(3, col, 0.3 + progress * 0.35 + pulse);
       g.strokeEllipse(a.x, a.y, r * 2, r * 1.56);
-      g.fillStyle(col, 0.12 + progress * 0.18);
+      g.fillStyle(col, 0.12 + progress * 0.18 + pulse);
       g.fillEllipse(a.x, a.y, r * 2, r * 1.56);
     } else if (
       ab.id === 'boss_breath' ||
@@ -1352,7 +1385,7 @@ export function drawAbilityOverlays(
         (ab.id === 'elem_beam' ? 0.18 : ab.id === 'boss_beam' ? 0.22 : 0.58);
       const range = (ab.range || 240) * (0.4 + progress * 0.6);
       const ang = ab.ang || 0;
-      g.fillStyle(col, 0.28 + progress * 0.4);
+      g.fillStyle(col, 0.28 + progress * 0.4 + pulse);
       g.beginPath();
       g.moveTo(a.x, a.y);
       g.arc(a.x, a.y, range, ang - half, ang + half, false);
@@ -1382,16 +1415,43 @@ export function drawAbilityOverlays(
           g.fillStyle(col, pop * 0.35);
           g.fillEllipse(h.x, h.y, h.r * 2, h.r);
         } else {
-          g.fillStyle(0x8a6a3a, 1);
-          for (let i = -1; i <= 1; i++) {
-            const hx = h.x + i * 10;
-            const hh = 18 + pop * 22;
-            g.fillTriangle(hx, h.y + 4 - hh, hx - 5, h.y + 4 - hh * 0.4, hx + 5, h.y + 4 - hh * 0.4);
+          // Tall stone spikes — base + tip layers so they read clearly at hazard scale.
+          g.fillStyle(0x6a4e28, 1);
+          for (let i = -2; i <= 2; i++) {
+            const hx = h.x + i * 14;
+            const hh = (28 + Math.abs(i) * 4) + pop * 48;
+            const half = 7 + (2 - Math.abs(i)) * 1.5;
+            g.fillTriangle(
+              hx,
+              h.y + 6 - hh,
+              hx - half,
+              h.y + 6 - hh * 0.28,
+              hx + half,
+              h.y + 6 - hh * 0.28,
+            );
           }
-          g.fillStyle(col, pop * 0.5);
-          g.fillEllipse(h.x, h.y, h.r * 2, h.r);
+          g.fillStyle(0xc4a35a, 0.85 * pop);
+          for (let i = -1; i <= 1; i++) {
+            const hx = h.x + i * 14;
+            const hh = 36 + pop * 40;
+            g.fillTriangle(hx, h.y + 4 - hh, hx - 5, h.y + 4 - hh * 0.35, hx + 5, h.y + 4 - hh * 0.35);
+          }
+          g.fillStyle(col, pop * 0.45);
+          g.fillEllipse(h.x, h.y, h.r * 2, h.r * 1.05);
         }
       }
+    } else if (h.type === 'totem') {
+      const fade = clamp(1 - h.age / h.life, 0, 1);
+      g.fillStyle(0x6dd46a, 0.18 * fade);
+      g.fillEllipse(h.x, h.y, h.r * 2, h.r * 1.35);
+      g.lineStyle(2, 0x9b7bde, 0.45 * fade);
+      g.strokeEllipse(h.x, h.y, h.r * 2, h.r * 1.35);
+      g.fillStyle(0x5a4028, 0.9 * fade);
+      g.fillRect(h.x - 4, h.y - 22, 8, 24);
+      g.fillStyle(0x3a2414, 0.95 * fade);
+      g.fillTriangle(h.x, h.y - 30, h.x - 10, h.y - 18, h.x + 10, h.y - 18);
+      g.fillStyle(0x6dd46a, 0.85 * fade);
+      g.fillCircle(h.x, h.y - 12, 3.5);
     } else if (h.type === 'burn') {
       const fade = clamp(1 - h.age / h.life, 0, 1);
       g.fillStyle(0xff8c28, 0.35 * fade);

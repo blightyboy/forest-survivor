@@ -149,7 +149,7 @@ export const SPECIES: Record<string, SpeciesDef> = {
     windup: 0.48, lungeSpeed: 240, lungeTime: 0.16, cooldown: 1.25, kb: 280, stagger: true,
     meat: [1, 2], goldChance: 0.35, gold: 1, xp: 7, height: 30, bodyOff: 11, eye: [15, -17],
     color: '#7a4a28',
-    ranged: true, range: 360, preferRange: 250, shotSpeed: 300, shotRadius: 15,
+    ranged: true, range: 360, preferRange: 250, shotSpeed: 300, shotRadius: 13,
     shotKind: 'log', shotColor: '#8a5a2a', shotSpin: 7,
     bossCombat: { dmg: 11, chase: 120, aggro: 370, windup: 0.4, cooldown: 1.05, range: 420, preferRange: 270, shotSpeed: 340 },
   },
@@ -201,7 +201,14 @@ export function isTinyPest(species: string): boolean {
   return species === 'squirrel' || species === 'duck' || species === 'rat';
 }
 
-export type AnimalVariantId = 'basic' | 'dire' | 'necromantic' | 'demonic';
+export type AnimalVariantId =
+  | 'basic'
+  | 'dire'
+  | 'necromantic'
+  | 'demonic'
+  | 'armored'
+  | 'frenzied'
+  | 'blessed';
 
 export interface AnimalVariantDef {
   id: AnimalVariantId;
@@ -238,9 +245,47 @@ export const ANIMAL_VARIANTS: Record<AnimalVariantId, AnimalVariantDef> = {
     bar: '#ff4a3a',
     rim: 'rgba(255, 55, 30, 0.5)',
   },
+  armored: {
+    id: 'armored', name: 'Armored',
+    hp: 1.55, dmg: 1.05, speed: 0.84, xp: 1.4, loot: 1.4,
+    bar: '#a8b8c8',
+    rim: 'rgba(180, 205, 230, 0.7)',
+  },
+  frenzied: {
+    id: 'frenzied', name: 'Frenzied',
+    hp: 1.15, dmg: 1.12, speed: 1.1, xp: 1.35, loot: 1.25,
+    bar: '#ff7a28',
+    rim: 'rgba(255, 100, 30, 0.55)',
+  },
+  blessed: {
+    id: 'blessed', name: 'Blessed',
+    hp: 1.2, dmg: 1.05, speed: 0.98, xp: 1.5, loot: 1.35,
+    bar: '#ffe066',
+    rim: 'rgba(255, 220, 100, 0.6)',
+  },
 };
 
-export const VARIANT_IDS: AnimalVariantId[] = ['basic', 'dire', 'necromantic', 'demonic'];
+export const VARIANT_IDS: AnimalVariantId[] = [
+  'basic', 'dire', 'necromantic', 'demonic', 'armored', 'frenzied', 'blessed',
+];
+
+/** Armored hit damage reduction (DoTs ignore this). */
+export const ARMORED_DR = 0.28;
+
+/**
+ * Frenzied power ramp below 40% HP — used for damage and move speed.
+ * Returns 1 when not frenzied / above the threshold.
+ */
+export function frenzyMul(
+  a: { variant?: string; hp: number; maxHp: number },
+  kind: 'dmg' | 'speed' = 'dmg',
+): number {
+  if (a.variant !== 'frenzied' || a.maxHp <= 0) return 1;
+  const frac = clamp(a.hp / a.maxHp, 0, 1);
+  if (frac >= 0.4) return 1;
+  const t = (0.4 - frac) / 0.4;
+  return kind === 'speed' ? 1 + t * 0.35 : 1 + t * 0.5;
+}
 
 export interface VariantMult {
   hp: number;
@@ -265,7 +310,7 @@ export interface RollAnimalVariantOpts {
 }
 
 /**
- * Roll an affliction variant. Higher threat → more dire / necro / demonic.
+ * Roll an affliction variant. Higher threat → more rare variants.
  * Swarms stay mostly basic.
  */
 export function rollAnimalVariant(threatM: number, opts: RollAnimalVariantOpts = {}): AnimalVariantId {
@@ -276,14 +321,26 @@ export function rollAnimalVariant(threatM: number, opts: RollAnimalVariantOpts =
   const raider = !!opts.raider;
   const big = !!opts.big;
 
-  const demonicP = clamp(0.015 + m * 0.014 + (boss ? 0.1 : 0) + (raider ? 0.025 : 0), 0, 0.24);
-  const necroP = clamp(0.03 + m * 0.02 + (boss ? 0.12 : 0) + (raider ? 0.04 : 0), 0, 0.3);
-  const direP = clamp(0.07 + m * 0.028 + (big ? 0.12 : 0) + (boss ? 0.08 : 0) + (raider ? 0.05 : 0), 0, 0.4);
+  const demonicP = clamp(0.012 + m * 0.012 + (boss ? 0.09 : 0) + (raider ? 0.02 : 0), 0, 0.2);
+  const necroP = clamp(0.025 + m * 0.018 + (boss ? 0.1 : 0) + (raider ? 0.035 : 0), 0, 0.26);
+  const armoredP = clamp(0.035 + m * 0.016 + (big ? 0.08 : 0) + (boss ? 0.05 : 0), 0, 0.22);
+  const frenziedP = clamp(0.035 + m * 0.018 + (raider ? 0.06 : 0) + (boss ? 0.04 : 0), 0, 0.24);
+  const blessedP = clamp(0.022 + m * 0.014 + (boss ? 0.08 : 0), 0, 0.18);
+  const direP = clamp(0.06 + m * 0.024 + (big ? 0.1 : 0) + (boss ? 0.06 : 0) + (raider ? 0.04 : 0), 0, 0.34);
 
   const r = Math.random();
-  if (r < demonicP) return 'demonic';
-  if (r < demonicP + necroP) return 'necromantic';
-  if (r < demonicP + necroP + direP) {
+  let acc = demonicP;
+  if (r < acc) return 'demonic';
+  acc += necroP;
+  if (r < acc) return 'necromantic';
+  acc += armoredP;
+  if (r < acc) return 'armored';
+  acc += frenziedP;
+  if (r < acc) return 'frenzied';
+  acc += blessedP;
+  if (r < acc) return 'blessed';
+  acc += direP;
+  if (r < acc) {
     if (opts.species && String(opts.species).startsWith('dire_')) return 'basic';
     return 'dire';
   }

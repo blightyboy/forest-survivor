@@ -1,6 +1,6 @@
 /** Selectable run modifiers — stackable toggles from the main menu. */
 
-export const MUTATOR_IDS = ['savage', 'noGrace', 'glass', 'siege', 'scarcity'] as const;
+export const MUTATOR_IDS = ['savage', 'noGrace', 'glass', 'siege', 'scarcity', 'vanilla'] as const;
 export type MutatorId = (typeof MUTATOR_IDS)[number];
 
 export type MutatorDef = {
@@ -41,6 +41,12 @@ export const MUTATORS: MutatorDef[] = [
     desc: 'Loot ×0.7 · thinner smith stock',
     color: '#ffe08a',
   },
+  {
+    id: 'vanilla',
+    name: 'Vanilla',
+    desc: 'No camp · XP-only loot · hunt the player · HP +50% · dmg −25%',
+    color: '#e8e0d0',
+  },
 ];
 
 export const MUTATOR_BY_ID: Record<MutatorId, MutatorDef> = Object.fromEntries(
@@ -54,10 +60,17 @@ export type MutatorEffects = {
   graceSec: number;
   playerHpMult: number;
   playerDmgMult: number;
+  enemyDmgMult: number;
   siegeWaveMult: number;
   siegeTimerMult: number;
   lootMult: number;
   shopCountMult: number;
+  /** No cabin/buildings — pure survival against beasts. */
+  noCamp: boolean;
+  /** Enemies / wagons drop XP only (no wood/meat/gold). */
+  xpOnlyLoot: boolean;
+  /** Raiders and wildlife always chase the player, never siege camp. */
+  huntPlayerOnly: boolean;
 };
 
 export function normalizeMutatorIds(raw: unknown): MutatorId[] {
@@ -74,17 +87,22 @@ export function normalizeMutatorIds(raw: unknown): MutatorId[] {
 
 export function computeMutatorEffects(ids: MutatorId[], baseGrace: number): MutatorEffects {
   const set = new Set(ids);
+  const vanilla = set.has('vanilla');
   return {
     ids,
     threatMult: set.has('savage') ? 1.35 : 1,
     creditMult: set.has('savage') ? 1.25 : 1,
     graceSec: set.has('noGrace') ? 0 : baseGrace,
-    playerHpMult: set.has('glass') ? 0.7 : 1,
-    playerDmgMult: set.has('glass') ? 1.15 : 1,
+    playerHpMult: (set.has('glass') ? 0.7 : 1) * (vanilla ? 1.5 : 1),
+    playerDmgMult: (set.has('glass') ? 1.15 : 1) * (vanilla ? 0.75 : 1),
+    enemyDmgMult: vanilla ? 0.75 : 1,
     siegeWaveMult: set.has('siege') ? 1.35 : 1,
     siegeTimerMult: set.has('siege') ? 0.65 : 1,
     lootMult: set.has('scarcity') ? 0.7 : 1,
     shopCountMult: set.has('scarcity') ? 0.65 : 1,
+    noCamp: vanilla,
+    xpOnlyLoot: vanilla,
+    huntPlayerOnly: vanilla,
   };
 }
 

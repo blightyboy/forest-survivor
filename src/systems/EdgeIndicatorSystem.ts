@@ -45,6 +45,8 @@ export class EdgeIndicatorSystem {
     _playerX: number,
     _playerY: number,
     animals: AnimalEntity[],
+    /** Vanilla: no cabin — omit the Camp edge arrow. */
+    showCamp = true,
   ) {
     const g = this.gfx;
     g.clear();
@@ -113,7 +115,7 @@ export class EdgeIndicatorSystem {
         if (++shown >= 14) break;
       }
     }
-    marker(campX, campY - 40, 0xffd23f, 13, 'Camp');
+    if (showCamp) marker(campX, campY - 40, 0xffd23f, 13, 'Camp');
   }
 
   destroy() {

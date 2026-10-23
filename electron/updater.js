@@ -22,6 +22,9 @@ const RELEASES_API =
 const RELEASES_PAGE =
   'https://github.com/' + GITHUB_OWNER + '/' + GITHUB_REPO + '/releases/latest';
 
+/** Recurring GitHub poll while no update has been found yet. */
+const CHECK_INTERVAL_MS = 2 * 60 * 1000;
+
 /** @type {import('electron').BrowserWindow | null} */
 let win = null;
 let autoUpdater = null;
@@ -30,6 +33,9 @@ let downloading = false;
 /** Path to a manually downloaded installer/portable exe (when not using electron-updater). */
 let manualPackagePath = null;
 let useManualInstall = false;
+/** @type {ReturnType<typeof setInterval> | null} */
+let checkTimer = null;
+let checking = false;
 
 function isPortable() {
   return !!process.env.PORTABLE_EXECUTABLE_DIR;
@@ -267,6 +273,36 @@ async function downloadDirectAsset() {
   return { ok: true, path: dest };
 }
 
+function stopPeriodicChecks() {
+  if (checkTimer) {
+    clearInterval(checkTimer);
+    checkTimer = null;
+  }
+}
+
+/**
+ * First check after load, then every couple of minutes until an update is found.
+ */
+function startPeriodicChecks(browserWindow) {
+  win = browserWindow;
+  stopPeriodicChecks();
+  if (!app.isPackaged) {
+    send('update:status', { state: 'dev', currentVersion: app.getVersion() });
+    return;
+  }
+  const run = () => {
+    if (!win || win.isDestroyed()) {
+      stopPeriodicChecks();
+      return;
+    }
+    checkForUpdates(win).catch((err) => {
+      console.warn('[updater] check failed:', err && err.message);
+    });
+  };
+  run();
+  checkTimer = setInterval(run, CHECK_INTERVAL_MS);
+}
+
 /**
  * Check GitHub latest release tag vs local version.
  */
@@ -277,6 +313,16 @@ async function checkForUpdates(browserWindow) {
     return { ok: true, skipped: 'dev' };
   }
 
+  // Already found (or downloading) — stop polling and avoid re-prompting.
+  if (pendingInfo) {
+    stopPeriodicChecks();
+    return { ok: true, updateAvailable: true, info: pendingInfo, alreadyKnown: true };
+  }
+  if (checking || downloading) {
+    return { ok: true, skipped: 'busy' };
+  }
+
+  checking = true;
   const currentVersion = normalizeVersion(app.getVersion());
   send('update:status', { state: 'checking', currentVersion });
 
@@ -284,6 +330,7 @@ async function checkForUpdates(browserWindow) {
   try {
     release = await fetchLatestRelease();
   } catch (err) {
+    checking = false;
     send('update:status', {
       state: 'error',
       currentVersion,
@@ -294,6 +341,7 @@ async function checkForUpdates(browserWindow) {
 
   const cmp = compareVersions(currentVersion, release.version);
   if (cmp >= 0) {
+    checking = false;
     send('update:status', {
       state: 'upToDate',
       currentVersion,
@@ -317,6 +365,8 @@ async function checkForUpdates(browserWindow) {
     canAutoInstall: !!(release.setupUrl || release.portableUrl),
   };
 
+  stopPeriodicChecks();
+  checking = false;
   send('update:available', pendingInfo);
 
   // Warm electron-updater when a feed exists (installed NSIS builds).
@@ -435,11 +485,14 @@ function getPending() {
 
 module.exports = {
   checkForUpdates,
+  startPeriodicChecks,
+  stopPeriodicChecks,
   startDownload,
   quitAndInstall,
   getPending,
   compareVersions,
   normalizeVersion,
+  CHECK_INTERVAL_MS,
   GITHUB_OWNER,
   GITHUB_REPO,
 };

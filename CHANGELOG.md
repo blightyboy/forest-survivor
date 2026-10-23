@@ -2,6 +2,30 @@
 
 All notable changes to Forest Survivor are documented here.
 
+## 0.2.7-alpha-build
+
+### Vanilla mutator
+- New stackable mutator: **no camp/buildings**, player-only messaging, XP-only enemy/wagon/tree loot, ore rocks & rich veins disabled
+- Raids and daytime assaults spawn on / hunt the player; Camp edge arrow hidden
+- Player HP ×1.5 · player damage ×0.75 · enemy damage ×0.75; resources HUD hidden
+
+### Camp build overhaul
+- Building panel accordion with Tower-style sub-upgrades (campfire, mill, mine, butcher, smith)
+- Stackable camp risks (Predator's Bait, Forest Beckons, Cursed Totem) with banners
+- Eternal Fire gated on Campfire 6/6 after other campfire upgrades
+- Restored / expanded building animations (mill, mine, butcher, forge, campfire, towers)
+
+### Combat & beasts
+- DoTs unique per type (fire ≠ poison stacks)
+- Enemy ability commit after telegraph **0.5s** (was 1s)
+- New variants: **Armored**, **Frenzied**, **Blessed** (visuals + combat hooks)
+- Stone Spikes eruptions larger (hitbox + art)
+- SFX max-overlap scheduling so busy fights stay audible
+
+### Polish
+- Watchtower accordion no longer stuck open; risk costs / copy tweaks
+- Gold Pouch card text no longer assumes a camp
+
 ## 0.2.6-alpha-build
 
 ### Icons everywhere
