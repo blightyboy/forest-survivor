@@ -86,6 +86,65 @@ export class FxSystem {
     this.ring(x, y, color, 8, 70, 0.4);
   }
 
+  /**
+   * Kill pop: soft smoke poof + brief blood splatters so deaths read clearly.
+   * `scale` ~1 for normal beasts, higher for big/boss kills.
+   */
+  deathPoof(x: number, y: number, scale = 1) {
+    const s = clamp(scale, 0.7, 2.2);
+    // Expanding dust / smoke poof.
+    this.ring(x, y, 'rgba(210,190,160,0.85)', 6 * s, 48 * s, 0.32);
+    this.ring(x, y, 'rgba(120,90,70,0.45)', 4 * s, 36 * s, 0.28);
+    for (let i = 0; i < Math.round(10 * s); i++) {
+      const a = Math.random() * TAU;
+      const sp = rand(30, 110) * s;
+      const smoke =
+        Math.random() < 0.4
+          ? 'rgba(200,180,150,0.75)'
+          : Math.random() < 0.5
+            ? 'rgba(160,140,120,0.7)'
+            : 'rgba(90,70,55,0.65)';
+      this.spawnDot(
+        x + Math.cos(a) * rand(0, 8) * s,
+        y + Math.sin(a) * rand(0, 6) * s,
+        smoke,
+        rand(3.5, 7.5) * s,
+        Math.cos(a) * sp,
+        Math.sin(a) * sp * 0.55 - rand(20, 70),
+        rand(0.35, 0.55),
+        6,
+      );
+    }
+    // Brief blood splatters (arcs + droplets).
+    const bloodN = Math.round(8 * s);
+    for (let i = 0; i < bloodN; i++) {
+      const a = Math.random() * TAU;
+      const sp = rand(60, 200) * s;
+      const col = Math.random() < 0.35 ? '#8a1518' : Math.random() < 0.5 ? '#c4553e' : '#e5383b';
+      if (Math.random() < 0.4) {
+        this.spawnRect(
+          x,
+          y,
+          col,
+          rand(2, 4.5) * s,
+          Math.cos(a) * sp,
+          Math.sin(a) * sp * 0.65 - rand(30, 90),
+          rand(0.28, 0.45),
+        );
+      } else {
+        this.spawnDot(
+          x,
+          y,
+          col,
+          rand(1.8, 4) * s,
+          Math.cos(a) * sp,
+          Math.sin(a) * sp * 0.7 - rand(40, 110),
+          rand(0.3, 0.5),
+        );
+      }
+    }
+  }
+
   ring(x: number, y: number, color: string, r0: number, r1: number, life = 0.45) {
     const col = this.parseColor(color);
     const gfx = this.scene.add

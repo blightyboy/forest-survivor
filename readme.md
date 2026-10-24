@@ -2,7 +2,7 @@
 
 **Chop trees. Gather resources. Fortify your camp. Survive the nights.**
 
-Version: `0.2.8-alpha-build`
+Version: `0.2.9-alpha-build`
 
 A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + Vite, packaged with Electron. Play as a lumberjack in a hostile forest: chop wood, hunt beasts, build defenses, pick level-up cards, and hold the camp against raids.
 
@@ -33,7 +33,8 @@ A top-down survival action game built with **Phaser 3** (WebGL) + TypeScript + V
 | Run mutators | **6** (stackable challenges, including Vanilla) |
 | Win goals | **4** (Endless / Easy 6 / Medium 12 / Hard 18) |
 | Coach tutorials | **11** |
-| Opening grace | **30s** (peaceful wildlife; assaults/bosses held) |
+| Opening grace | **30s** (peaceful wildlife; assaults held) |
+| Boss unlock | **60s** into the run (day champions + night mini/true) |
 | Veterancy | up to **15★** (bronze → silver → gold) |
 
 ---
@@ -60,7 +61,7 @@ Optional **win goals**: Endless, Easy (6 nights), Medium (12), Hard (18). Surviv
 
 ### Opening grace
 
-The first **30 seconds** are calm: wildlife ignores you and the camp unless you strike first. Daytime assaults and boss spawns wait until grace ends.
+The first **30 seconds** are calm: wildlife ignores you and the camp unless you strike first. Daytime assaults wait until grace ends; day champions and night bosses unlock after **1 minute**.
 
 ### Beasts & combat pressure
 
@@ -68,7 +69,8 @@ The first **30 seconds** are calm: wildlife ignores you and the camp unless you 
 - **7 variants** — Dire (tougher), Necromantic (splits on death), Demonic (fire pool on death), Armored (DR), Frenzied (ramps at low HP), Blessed (aura).
 - **6 elements** with **18** enemy abilities total; veterancy unlocks more moves (1 → 2 → 3 → full pool). Telegraph → **0.5s** commit → act.
 - **10 true-boss moves** — Rampage, Fiery Ground, Inspiring Aura, Water Breath, Titan Stomp, Bone Volley, Crushing Leap, Skyfall, Ruin Beam, Dread Howl.
-- Status: poison and burn DoTs stack separately; slows; camp/palisade hits flash a red vignette.
+- Status: poison and burn DoTs stack separately; slows; camp under attack uses a HUD status pulse (not a full-screen vignette).
+- Player hits read with HP pulse, soft edge vignette, stronger i-frames, clearer damage floats, and brief hit-stop.
 
 ### Defenses & camp
 
@@ -77,7 +79,7 @@ The first **30 seconds** are calm: wildlife ignores you and the camp unless you 
 | **Camp** | Core HP and passive resource income. If it falls, the run ends. |
 | **Palisade** | Walls that block raiders. |
 | **Watchtower / Archers / Barrage / Volley** | Auto-firing tower defenses (up to **8** towers). |
-| **Campfire** | Heals you while inside the camp (+ Warm Embers / Guardian Flame / Eternal Fire). |
+| **Campfire** | Heals inside the yard; **Eternal Fire** also heals outside the walls at half rate in an expanded ring. |
 | **Lumber Mill / Gold Mine / Butcher** | Periodic resource production (+ yield / speed sub-upgrades). |
 | **Blacksmith** | Gear shop across **14** slots and **6** quality tiers; buying replaces the slot (+ forge combat subs). |
 | **Camp risks** | Predator's Bait, Forest Beckons, Cursed Totem — high reward, permanent pressure. |

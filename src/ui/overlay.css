@@ -64,19 +64,181 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
+  justify-content: flex-end;
   gap: 10px;
   pointer-events: none;
+  z-index: 14;
 }
 
 .fs-hud .fs-panel {
   pointer-events: auto;
 }
 
-.fs-hud-left {
+/* Bottom status bar: 60% screen width, centered; HP 80% / side 20% */
+.fs-hud-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  width: 60vw;
+  max-width: 60vw;
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.fs-hud-bottom-col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+}
+.fs-hud-bottom-buffs {
+  display: flex;
+  justify-content: flex-start;
+  min-height: 0;
+}
+.fs-hud-bottom-main {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  background: var(--fs-wood, rgba(42, 28, 16, 0.92));
+  border: 2px solid var(--fs-border, #3a2414);
+  border-radius: 14px;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+.fs-hud-bottom-main > .fs-panel,
+.fs-hud-bottom-side > .fs-panel {
+  pointer-events: auto;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+.fs-hud-bottom .fs-status {
+  min-width: 0;
+  width: 100%;
+}
+.fs-hud-bottom .fs-status-bars {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+.fs-hud-bottom .fs-bar-row {
+  width: 100%;
+}
+.fs-hud-bottom .fs-track,
+.fs-hud-bottom .fs-xp {
+  width: 100%;
+  max-width: none;
+}
+.fs-hud-bottom .fs-xp {
+  margin-left: 1.625em;
+  box-sizing: border-box;
+  width: calc(100% - 1.625em);
+}
+.fs-hud-bottom-side {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+}
+.fs-hud-bottom-camp {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+}
+.fs-hud-bottom .fs-camp-status {
+  padding: 6px 8px;
+  min-height: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+}
+.fs-hud-bottom .fs-resources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 8px;
+  padding: 0;
+}
+.fs-hud-bottom .fs-res {
+  font-size: 0.95rem;
+  min-width: 0;
+}
+
+/* Bottom-left: loadout → gear → (day | timer | mutators) */
+.fs-hud-corner {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 12;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
+  max-width: min(640px, calc(100vw - 24px));
+  pointer-events: none;
+}
+.fs-hud-corner-load,
+.fs-hud-corner-gear {
+  display: flex;
+  max-width: 100%;
+}
+/* Day / timer / mutators — one horizontal strip (no wrap) */
+.fs-hud-corner-meta {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  pointer-events: none;
+}
+.fs-hud-corner-meta > .fs-panel {
+  pointer-events: auto;
+  margin: 0;
+}
+.fs-hud-corner-meta .fs-time {
+  flex: 0 0 auto;
+  min-width: 9.5em;
+  max-width: 12.5em;
+  padding: 0.4em 0.65em;
+  gap: 3px;
+  box-sizing: border-box;
+}
+.fs-hud-corner-meta .fs-fps-panel {
+  flex: 0 0 auto;
+  padding: 0.45em 0.7em;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  align-self: center;
+}
+.fs-hud-corner-meta .fs-mutator-hud {
+  flex: 0 1 auto;
+  align-self: center;
+  min-width: 0;
+  max-width: none;
+  padding: 0.15em 0.25em;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.3em;
 }
 
 .fs-status {
@@ -314,8 +476,8 @@ body {
 }
 .fs-banish-left b { color: #ffb0b0; }
 
-/* Soft red vignette when cabin / palisade takes a hit (throttled in CampSystem). */
-.fs-camp-hurt {
+/* Soft thin edge vignette on player damage only (never used for camp). */
+.fs-player-hurt {
   position: fixed;
   inset: 0;
   z-index: 17;
@@ -323,23 +485,104 @@ body {
   opacity: 0;
   background: radial-gradient(
     ellipse at center,
-    rgba(180, 12, 24, 0) 42%,
-    rgba(190, 16, 28, 0.16) 78%,
-    rgba(140, 0, 12, 0.28) 100%
+    rgba(180, 12, 24, 0) 58%,
+    rgba(200, 20, 32, 0.14) 82%,
+    rgba(120, 0, 10, 0.32) 100%
   );
 }
-.fs-camp-hurt.flash {
-  animation: fs-camp-hurt-flash 0.48s ease-out forwards;
+.fs-player-hurt.flash {
+  animation: fs-player-hurt-flash 0.3s ease-out forwards;
 }
-@keyframes fs-camp-hurt-flash {
+@keyframes fs-player-hurt-flash {
   0% {
-    opacity: 0.38;
+    opacity: 0.55;
   }
-  40% {
-    opacity: 0.22;
+  45% {
+    opacity: 0.28;
   }
   100% {
     opacity: 0;
+  }
+}
+
+/* Camp attack cue — center of bottom bar */
+.fs-camp-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  min-height: 2.5rem;
+  border-radius: 10px;
+  background: rgba(20, 14, 10, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  color: #d8c9a8;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  transform-origin: center center;
+}
+.fs-camp-status-ico {
+  display: inline-flex;
+  width: 1.25em;
+  height: 1.25em;
+  flex: none;
+  opacity: 0.9;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.35));
+}
+.fs-camp-status-ico svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.fs-camp-status.pulse {
+  animation: fs-camp-status-pulse 0.45s ease-out;
+  color: #ffe8e8;
+  border-color: #c43a3a;
+  background: rgba(88, 18, 20, 0.95);
+  box-shadow: 0 0 18px rgba(255, 50, 50, 0.4);
+}
+@keyframes fs-camp-status-pulse {
+  0% {
+    transform: translateX(0) scale(1);
+    box-shadow: 0 0 0 rgba(255, 60, 60, 0);
+  }
+  18% {
+    transform: translateX(-4px) rotate(-1.4deg) scale(1.03);
+    box-shadow: 0 0 18px rgba(255, 50, 50, 0.55);
+  }
+  36% {
+    transform: translateX(4px) rotate(1.2deg) scale(1.02);
+  }
+  54% {
+    transform: translateX(-2px) scale(1.01);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+    box-shadow: 0 0 0 rgba(255, 60, 60, 0);
+  }
+}
+
+#hud-hp-bar.hurt-pulse {
+  animation: fs-hp-hurt-pulse 0.35s ease-out;
+}
+#hud-hp-bar.hurt-pulse > span {
+  filter: brightness(1.25) saturate(1.35);
+  box-shadow: 0 0 10px rgba(255, 70, 70, 0.55);
+}
+@keyframes fs-hp-hurt-pulse {
+  0% {
+    outline: 2px solid rgba(255, 70, 70, 0.85);
+    outline-offset: 1px;
+  }
+  100% {
+    outline: 2px solid rgba(255, 70, 70, 0);
+    outline-offset: 1px;
   }
 }
 
@@ -458,15 +701,15 @@ body {
   flex: 1 1 12.5rem;
   max-width: min(22rem, 92vw);
   min-width: 11rem;
-  padding: 0.4rem 0.55rem 0.45rem;
-  background: linear-gradient(180deg, rgba(36, 24, 14, 0.94), rgba(18, 12, 8, 0.96));
-  border: 2px solid #c9a227;
-  border-radius: 0.45rem;
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 230, 160, 0.12);
+  padding: 0.35rem 0.45rem 0.4rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 .fs-boss-card.true {
-  border-color: #e8c04a;
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 0 14px rgba(255, 77, 109, 0.22);
+  border: none;
+  box-shadow: none;
 }
 .fs-boss-solo .fs-boss-card {
   flex: 0 1 28rem;
@@ -518,7 +761,7 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #fff4e4;
-  text-shadow: 0 2px 0 #2a1808;
+  text-shadow: 0 2px 0 #2a1808, 0 0 8px rgba(0, 0, 0, 0.65);
   line-height: 1.1;
   white-space: nowrap;
   overflow: hidden;
@@ -685,14 +928,14 @@ body {
   text-shadow: 0 3px 0 #5a1214;
 }
 
-/* buff hud — sits under .fs-status inside .fs-hud-left */
+/* buff hud — sits above LVL/HP in the bottom bar */
 .fs-buff-hud {
   position: static;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   pointer-events: none;
-  max-width: min(20rem, 70vw);
+  max-width: min(28rem, 90vw);
 }
 .fs-buff {
   display: flex;
@@ -883,6 +1126,7 @@ body {
 .fs-overlay {
   position: absolute;
   inset: 0;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1136,12 +1380,11 @@ body {
 
 .fs-mutator-hud {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.3em;
   font-size: 0.72rem;
   font-weight: 800;
   color: #ff9a6b;
-  max-width: 16em;
   line-height: 1.25;
   opacity: 0.9;
 }
@@ -2147,8 +2390,9 @@ body {
 
 .fs-tip {
   position: absolute;
-  left: 10px;
-  bottom: 10px;
+  left: 50%;
+  bottom: 5.75rem;
+  transform: translateX(-50%);
   max-width: min(90vw, 720px);
   padding: 7px 12px;
   font-size: 0.7813rem;
@@ -2158,6 +2402,8 @@ body {
   border-radius: 10px;
   border: none;
   pointer-events: none;
+  z-index: 14;
+  text-align: center;
 }
 
 .fs-tip b {
@@ -2211,6 +2457,24 @@ body {
     font-size: 1.0625rem;
     min-width: 2.5em;
   }
+  .fs-hud-bottom {
+    width: min(60vw, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+  }
+  .fs-hud-corner {
+    bottom: 6.75rem;
+    max-width: min(480px, calc(100vw - 16px));
+  }
+  .fs-hud-corner-meta {
+    gap: 5px;
+  }
+  .fs-hud-corner-meta .fs-time {
+    min-width: 8.5em;
+    max-width: 11em;
+  }
+  .fs-tip {
+    bottom: 6.75rem;
+  }
 }
 
 @media (max-width: 480px) {
@@ -2232,7 +2496,7 @@ body {
 .fs-build-watermark {
   position: absolute;
   right: 10px;
-  bottom: 8px;
+  bottom: 5.5rem;
   z-index: 8;
   pointer-events: none;
   font-size: 0.6875rem;
@@ -2244,16 +2508,13 @@ body {
   user-select: none;
 }
 
-/* ---- bottom-left gear slots (legacy #gearHud) ---- */
+/* ---- gear slots (flow inside .fs-hud-corner) ---- */
 .fs-gear-hud {
-  position: absolute;
-  left: 12px;
-  bottom: 92px;
-  z-index: 12;
+  position: static;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  max-width: min(280px, 70vw);
+  max-width: 100%;
   pointer-events: none;
 }
 .fs-gear-slot {
@@ -2307,17 +2568,14 @@ body {
   display: block;
 }
 
-/* ---- bottom-left loadout (weapons / passives) ---- */
+/* ---- loadout (weapons / passives — flow inside .fs-hud-corner) ---- */
 .fs-loadout {
-  position: absolute;
-  left: 12px;
-  bottom: 48px;
+  position: static;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  max-width: min(420px, 55vw);
+  max-width: 100%;
   pointer-events: auto;
-  z-index: 12;
 }
 .fs-load {
   pointer-events: auto;
@@ -3075,7 +3333,7 @@ body {
   }
   .fs-pause-body,
   .fs-camp-cols { grid-template-columns: 1fr; }
-  .fs-loadout { max-width: 90vw; bottom: 56px; }
+  .fs-loadout { max-width: 90vw; }
 }
 
 /* ---- options ---- */
@@ -3345,14 +3603,18 @@ body {
   word-break: break-word;
 }
 
-#dom-ui .fs-hud {
+#dom-ui .fs-hud,
+#dom-ui .fs-hud-bottom,
+#dom-ui .fs-hud-corner {
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 #dom-ui .fs-resources,
 #dom-ui .fs-time,
 #dom-ui .fs-status,
-#dom-ui .fs-fps-panel {
+#dom-ui .fs-fps-panel,
+#dom-ui .fs-hud-bottom-main {
   max-width: 100%;
   box-sizing: border-box;
 }

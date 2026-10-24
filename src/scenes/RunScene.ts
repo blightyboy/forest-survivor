@@ -70,6 +70,8 @@ export class RunScene extends Phaser.Scene {
   playerFacing = 1;
   playerWalkTime = 0;
   playerFlash = 0;
+  /** Real-time seconds of slowed simulation after a player hit. */
+  hitStopLeft = 0;
   playerDrawKey = '';
   arsenal = new ArsenalSystem();
   animals!: AnimalSystem;
@@ -195,6 +197,7 @@ export class RunScene extends Phaser.Scene {
     this.playerFacing = 1;
     this.playerWalkTime = 0;
     this.playerFlash = 0;
+    this.hitStopLeft = 0;
     this.playerDrawKey = '';
     this.treeSprites.clear();
     this.rockSprites.clear();
@@ -306,7 +309,11 @@ export class RunScene extends Phaser.Scene {
     this.applyMutatorPlayerMods(true);
 
     // Origin on feet (not canvas bottom) so HP/dash bars can sit below without floating the sprite.
-    this.playerCanvas = new CanvasSprite(this, this.worldLayer, 72, 96, 'rt_player', 0.5, (96 - 18) / 96);
+    // 25% larger than the legacy 72×96 canvas so the player reads clearly in combat.
+    const pw = 90;
+    const ph = 120;
+    const feetPad = 22.5;
+    this.playerCanvas = new CanvasSprite(this, this.worldLayer, pw, ph, 'rt_player', 0.5, (ph - feetPad) / ph);
     this.playerSprite = this.playerCanvas.image;
     this.redrawPlayer();
 
@@ -315,8 +322,7 @@ export class RunScene extends Phaser.Scene {
     this.animals.worldSize = { w: this.world.w, h: this.world.h };
     this.animals.biomeAt = (x, y) => this.world.biomeAt(x, y);
     this.animals.onPlayerHurt = () => {
-      this.playerFlash = 0.15;
-      this.shake(0.45);
+      this.onPlayerHurtFeedback();
     };
     this.animals.onSwarm = (label, count, tint) => {
       Audio.playSfx('chitter');
@@ -410,7 +416,7 @@ export class RunScene extends Phaser.Scene {
       });
     };
     this.camp.onStructureHit = () => {
-      if (!this.mutatorFx.noCamp) this.ui.flashCampHurt();
+      if (!this.mutatorFx.noCamp) this.ui.pulseCampStatus();
     };
     this.camp.onRaidStart = (day, count, directions, speciesHint, topSpecies) => {
       const goalN = winGoalNights(this.winGoal);
@@ -426,13 +432,6 @@ export class RunScene extends Phaser.Scene {
           iconId: gauntlet ? 'world_win' : 'world_raids',
           subHtml: `${count} beasts from the ${directions}${species}${pills ? ` ${pills}` : ''}`,
         },
-      );
-      this.ui.setTip(
-        gauntlet
-          ? 'Final gauntlet — survive to win!'
-          : solo
-            ? 'Night raid — they hunt you!'
-            : 'Night raid — defend the camp!',
       );
     };
     this.camp.onTrueBossSpawn = (name, moves) => {
@@ -798,6 +797,15 @@ export class RunScene extends Phaser.Scene {
     this.offerTutorial('enemy');
   }
 
+  /** Screen / HUD / hit-stop package shared by melee + ability damage. */
+  private onPlayerHurtFeedback() {
+    this.playerFlash = 0.22;
+    this.shake(0.55);
+    this.ui.flashPlayerHurt();
+    this.ui.pulsePlayerHp();
+    if (!this.paused && !this.levelUpOpen) this.hitStopLeft = 0.06;
+  }
+
   tryCampUpgrade(id: string) {
     if (!this.camp.contains(this.player.x, this.player.y, 30)) {
       this.ui.setTip('Return to camp to build');
@@ -1137,7 +1145,12 @@ export class RunScene extends Phaser.Scene {
   }
 
   update(_t: number, dtMs: number) {
-    const dt = Math.min(0.05, dtMs / 1000);
+    const realDt = Math.min(0.05, dtMs / 1000);
+    let dt = realDt;
+    if (!this.paused && !this.levelUpOpen && this.hitStopLeft > 0) {
+      this.hitStopLeft = Math.max(0, this.hitStopLeft - realDt);
+      dt = realDt * 0.4;
+    }
     this.handleHotkeys();
     Music.sync({
       state: !this.player.alive ? 'gameover' : 'playing',
@@ -1181,13 +1194,7 @@ export class RunScene extends Phaser.Scene {
       this.dayNight.dayNumber,
       threat.m,
       this.graceLeft,
-      () => {
-        this.ui.setTip(
-          this.mutatorFx.huntPlayerOnly
-            ? 'Night raid — they hunt you!'
-            : 'Night raid — defend the camp!',
-        );
-      },
+      () => {},
     );
     {
       const focus = this.camp.raidFocus(this.player);
@@ -1223,6 +1230,7 @@ export class RunScene extends Phaser.Scene {
       this.dayNight.isNight,
       this.dayNight.dayNumber,
       this.graceLeft,
+      this.dayNight.runTime,
     );
     this.combat.update(dt, this.player);
     this.world.updateTrees(dt, this.player.x, this.player.y);
@@ -1674,9 +1682,9 @@ export class RunScene extends Phaser.Scene {
       else if (mx || my) p.aimAngle = Math.atan2(my, mx);
     }
 
-    // Legacy player radius 13 — trees/rocks + buildings. Palisade blocks enemies only.
-    this.world.moveEntity(p, 13);
-    this.camp.collideStructures(p, 13);
+    // ~25% larger body — trees/rocks + buildings. Palisade blocks enemies only.
+    this.world.moveEntity(p, 16);
+    this.camp.collideStructures(p, 16);
 
     if (p.regen > 0 && p.hp < p.maxHp) {
       p.hp = Math.min(p.maxHp, p.hp + p.regen * dt);
@@ -1694,7 +1702,7 @@ export class RunScene extends Phaser.Scene {
     const p = this.player;
     const walkFrame = moveAmount > 0 ? (this.playerWalkTime * 2) | 0 : 0;
     const flashQ = this.playerFlash > 0 ? Math.ceil(this.playerFlash * 16) : 0;
-    const invQ = p.invuln > 0 ? Math.ceil(p.invuln * 8) : 0;
+    const invQ = p.invuln > 0 ? Math.ceil(p.invuln * 22) : 0;
     const hpQ = Math.round((p.hp / Math.max(1, p.maxHp)) * 20);
     const dashQ = Math.round(p.dashCharges * 4) + (p.dashCd > 0 ? Math.ceil(p.dashCd * 4) : 0);
     const poisoned = p.poisons.length > 0;
@@ -1705,6 +1713,7 @@ export class RunScene extends Phaser.Scene {
     this.playerDrawKey = key;
     this.playerCanvas.clear();
     this.playerCanvas.withFeetOrigin((ctx) => {
+      ctx.scale(1.25, 1.25);
       drawPlayer(ctx, {
         facing: this.playerFacing,
         walkTime: this.playerWalkTime,
@@ -1722,7 +1731,7 @@ export class RunScene extends Phaser.Scene {
         burning,
         slowed,
       });
-    });
+    }, 22.5);
     this.playerCanvas.refresh();
   }
 

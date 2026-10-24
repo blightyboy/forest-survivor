@@ -19,8 +19,13 @@ type SettingsData = {
   uiScale: number;
   fontScale: number;
   shakeScale: number;
-  /** Multiplier on adaptive camera zoom (0.6 = default/max; lower zooms out). */
+  /**
+   * Relative camera zoom vs the default view (1 = 100%).
+   * Absolute Phaser factor is `zoomScale * ZOOM_VIEW_BASE`.
+   */
   zoomScale: number;
+  /** True once zoomScale is stored as relative (1 = default). Legacy saves omitted this. */
+  zoomRelative?: boolean;
   tutorialsEnabled: boolean;
   tutorialsSeen: Record<string, boolean>;
   /** Active run mutators (menu toggles). */
@@ -29,10 +34,15 @@ type SettingsData = {
   winGoal: WinGoalId;
 };
 
-/** 60% is the default and max zoom; slider only zooms out from there. */
-export const ZOOM_SCALE_DEFAULT = 0.6;
-export const ZOOM_SCALE_MIN = 0.3;
-export const ZOOM_SCALE_MAX = 0.6;
+/**
+ * Absolute camera multiplier that equals 100% in Options.
+ * (Previously this was the default/max slider value of 0.6.)
+ */
+export const ZOOM_VIEW_BASE = 0.6;
+/** Relative zoom: 1 = default view; below zooms out, above zooms in. */
+export const ZOOM_SCALE_DEFAULT = 1;
+export const ZOOM_SCALE_MIN = 0.5;
+export const ZOOM_SCALE_MAX = 1.5;
 
 const DEFAULTS: SettingsData = {
   displayMode: 'windowed',
@@ -92,6 +102,7 @@ class SettingsManager implements SettingsData {
       fontScale: this.fontScale,
       shakeScale: this.shakeScale,
       zoomScale: this.zoomScale,
+      zoomRelative: true,
       tutorialsEnabled: !!this.tutorialsEnabled,
       tutorialsSeen: { ...this.tutorialsSeen },
       mutators: [...this.mutators],
@@ -128,7 +139,10 @@ class SettingsManager implements SettingsData {
     if (data.fontScale != null) this.fontScale = clampScale(data.fontScale, 0.85, 1.6, 1);
     if (data.shakeScale != null) this.shakeScale = clampScale(data.shakeScale, 0, 1, 1);
     if (data.zoomScale != null) {
-      this.zoomScale = clampScale(data.zoomScale, ZOOM_SCALE_MIN, ZOOM_SCALE_MAX, ZOOM_SCALE_DEFAULT);
+      let z = Number(data.zoomScale);
+      // Legacy absolute 0.3–0.6 → relative (old 0.6 becomes 1.0 / 100%).
+      if (!data.zoomRelative && Number.isFinite(z)) z = z / ZOOM_VIEW_BASE;
+      this.zoomScale = clampScale(z, ZOOM_SCALE_MIN, ZOOM_SCALE_MAX, ZOOM_SCALE_DEFAULT);
     }
     if (data.tutorialsEnabled != null || data.tutorialsSeen) {
       this.tutorialsEnabled = data.tutorialsEnabled !== false;

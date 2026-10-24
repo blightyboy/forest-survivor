@@ -1,5 +1,13 @@
 import Phaser from 'phaser';
-import { HIT_COOLDOWN, MAX_PICKUPS, xpNeeded, elementMult, POWERUPS, ELEMENTS } from '../data/constants';
+import {
+  HIT_COOLDOWN,
+  MAX_PICKUPS,
+  PICKUP_DELAY,
+  xpNeeded,
+  elementMult,
+  POWERUPS,
+  ELEMENTS,
+} from '../data/constants';
 import type { KillContext, AnimalEntity } from './AnimalSystem';
 import { applyBuffMultipliers } from './PlayerStats';
 import { gearBonuses } from '../data/shop';
@@ -16,6 +24,11 @@ import { WEAPON_DEFS, type WeaponId } from '../data/weapons';
 import { Audio } from '../audio/Audio';
 import { CanvasSprite } from '../art/draw/CanvasSprite';
 import { drawAxeHead, drawGuardDog, drawHammer, drawPikeThrust, drawUniqueGlow } from '../art/draw/weaponDraw';
+
+/** Visual size boost so thrown/shot weapons stay readable on forest greens. */
+const PLAYER_PROJ_SCALE = 1.55;
+/** Slightly smaller boost for orbiting / chain weapons (already large on-screen). */
+const PLAYER_ORBIT_SCALE = 1.3;
 
 type Proj = {
   x: number; y: number; vx: number; vy: number;
@@ -411,7 +424,8 @@ export class CombatSystem {
       // Hearts, XP, and resources all rush in.
       p.magnet = true;
       p.speed = 2200;
-      p.age = Math.max(p.age, 0.35);
+      // Vacuum bypasses the post-drop pickup delay.
+      p.age = Math.max(p.age, PICKUP_DELAY);
       n++;
     }
     this.vfx?.ring(player.x, player.y, ring, 40, 520, 0.7);
@@ -761,7 +775,7 @@ export class CombatSystem {
         .setRotation(ang + Math.PI / 2)
         .setDepth(Math.floor(ay) + 4)
         .clearTint()
-        .setScale(unique ? 1.12 : 1);
+        .setScale((unique ? 1.12 : 1) * PLAYER_ORBIT_SCALE);
       if (el && st.metal) {
         spr.setTint(Phaser.Display.Color.HexStringToColor(st.metal).color);
       }
@@ -968,6 +982,7 @@ export class CombatSystem {
       pk.canvas.image
         .setPosition(pk.x, pk.y - 10)
         .setRotation(pk.angle)
+        .setScale(PLAYER_PROJ_SCALE * (pk.unique ? 1.08 : 1))
         .setDepth(Math.floor(pk.y) + 8);
       pk._trailAcc = (pk._trailAcc || 0) + dt;
       {
@@ -1024,10 +1039,13 @@ export class CombatSystem {
       const ang = base + (count === 1 ? 0 : (i / count) * TAU);
       const dirX = Math.cos(ang);
       const dirY = Math.sin(ang);
-      const gfx = this.scene.add.image(player.x, player.y - 8, key).setDepth(15).setScale(1);
-      this.fx.add(gfx);
       const sawOpts = this.arsenal.fireOpts('saw');
       const sawUnique = !!(sawOpts.unique && el);
+      const gfx = this.scene.add
+        .image(player.x, player.y - 8, key)
+        .setDepth(15)
+        .setScale(PLAYER_PROJ_SCALE * (sawUnique ? 1.12 : 1) * (sawOpts.style.scale || 1));
+      this.fx.add(gfx);
       if (el && sawOpts.style.metal) {
         gfx.setTint(Phaser.Display.Color.HexStringToColor(sawOpts.style.metal).color);
       }
@@ -1080,7 +1098,7 @@ export class CombatSystem {
       const x0 = player.x;
       const y0 = player.y;
       const dur = clamp(Math.hypot(tx - x0, ty - y0) / 520, 0.35, 0.8);
-      const gfx = this.scene.add.image(x0, y0 - 20, 'dynamite').setDepth(16).setScale(1.15);
+      const gfx = this.scene.add.image(x0, y0 - 20, 'dynamite').setDepth(16).setScale(1.15 * PLAYER_PROJ_SCALE);
       const shadow = this.scene.add.ellipse(x0, y0 + 1, 14, 6, 0x000000, 0.2).setDepth(Math.floor(y0) - 1);
       this.fx.add(gfx);
       this.fx.add(shadow);
@@ -1138,7 +1156,7 @@ export class CombatSystem {
       const x0 = player.x;
       const y0 = player.y;
       const dur = clamp(Math.hypot(tx - x0, ty - y0) / 520, 0.35, 0.8);
-      const gfx = this.scene.add.image(x0, y0 - 20, tex).setDepth(16).setScale(1.1);
+      const gfx = this.scene.add.image(x0, y0 - 20, tex).setDepth(16).setScale(1.1 * PLAYER_PROJ_SCALE);
       if (el && ELEMENTS[el]) {
         gfx.setTint(Phaser.Display.Color.HexStringToColor(ELEMENTS[el].color).color);
       }
@@ -1278,7 +1296,7 @@ export class CombatSystem {
     const st = this.arsenal.drawStyle('chainhook');
     const tex = this.scene.textures.exists('chainhook') ? 'chainhook' : 'hatchet';
 
-    const ballScale = st.unique ? 1.85 : 1.65;
+    const ballScale = (st.unique ? 1.85 : 1.65) * PLAYER_ORBIT_SCALE;
     while (this.chainSprites.length < count) {
       const spr = this.scene.add.image(0, 0, tex).setDepth(12).setScale(ballScale);
       this.fxLayerSafeAdd(spr);
@@ -1876,11 +1894,16 @@ export class CombatSystem {
     weaponId?: string,
   ) {
     const key = this.scene.textures.exists(tex) ? tex : 'particle';
-    const gfx = this.scene.add.image(x, y, key).setDepth(15).setScale(tex === 'saw' ? 1 : 0.95);
-    gfx.setRotation(Math.atan2(vy, vx));
     const opts = weaponId ? this.arsenal.fireOpts(weaponId) : null;
     const unique = !!(opts?.unique && el);
     const st = opts?.style;
+    const base = tex === 'saw' ? 1 : 0.95;
+    const styleScale = st?.scale || 1;
+    const gfx = this.scene.add
+      .image(x, y, key)
+      .setDepth(15)
+      .setScale(base * PLAYER_PROJ_SCALE * styleScale);
+    gfx.setRotation(Math.atan2(vy, vx));
     if (el && st?.metal) {
       gfx.setTint(Phaser.Display.Color.HexStringToColor(st.metal).color);
     }
@@ -2047,7 +2070,7 @@ export class CombatSystem {
     }
     if (killed) {
       this.applyElementOnKill(a, atk, dmg, player);
-      this.vfx?.deathBurst(a.x, a.y - a.radius, '#c4553e', a.boss ? 18 : 10);
+      // Death poof/blood is fired from AnimalSystem.killAnimal so every kill path gets it.
     }
   }
 
@@ -2170,7 +2193,9 @@ export class CombatSystem {
       p.x = clamp(p.x, margin, maxX);
       p.y = clamp(p.y, margin, maxY);
 
-      if (!player.alive || p.age < 0.25) continue;
+      if (!player.alive) continue;
+      // Fresh drops sit briefly before magnet/pickup (vacuum sets magnet + age; nuke grants direct).
+      if (!p.magnet && p.age < PICKUP_DELAY) continue;
 
       const d2 = dist2(p.x, p.y, player.x, player.y);
       const d = Math.sqrt(d2) || 1;

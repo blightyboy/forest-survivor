@@ -102,13 +102,21 @@ export class DomUI {
   bannerEl: HTMLElement;
   /** Top-center event strip (grace timer, etc.) — same slot as banners. */
   eventHudEl: HTMLElement;
-  /** Full-screen red flash when camp / palisade is hit. */
-  campHurtEl: HTMLElement;
+  /** Soft edge vignette when the player takes damage (never used for camp). */
+  playerHurtEl: HTMLElement;
+  /** Bottom status bar: buffs + LVL/HP + camp attack cue + resources. */
+  hudBottomEl: HTMLElement;
+  /** Bottom-left stack: loadout, smith gear, day/time, FPS, mutators. */
+  hudCornerEl: HTMLElement;
+  /** Camp attack cue in the bottom bar center. */
+  campStatusEl: HTMLElement;
   bossHudEl: HTMLElement;
   buffHudEl: HTMLElement;
   /** Structural key so we rebuild boss cards only when the set changes. */
   private bossHudStructKey = '';
-  private campHurtTimer: ReturnType<typeof setTimeout> | null = null;
+  private campStatusTimer: ReturnType<typeof setTimeout> | null = null;
+  private playerHurtTimer: ReturnType<typeof setTimeout> | null = null;
+  private hpPulseTimer: ReturnType<typeof setTimeout> | null = null;
   private lastGearHudKey = '';
   private campSmithTab = false;
   private campPanelOpen = true;
@@ -128,6 +136,11 @@ export class DomUI {
   private lastLoadoutKey = '';
   private lastBuffKey = '';
   private bannerTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Remaining ms until banner hide; frozen while character sheet is open. */
+  private bannerRemainingMs = 0;
+  private bannerHideAt = 0;
+  private bannerTimerPaused = false;
+  private static readonly BANNER_DURATION_MS = 4200;
   private optionsFrom: 'menu' | 'pause' = 'menu';
   /** Draft options edited in the form; committed only via Apply changes. */
   private optionsDraft: {
@@ -152,7 +165,7 @@ export class DomUI {
     uiScale: 1,
     fontScale: 1,
     shakeScale: 1,
-    zoomScale: 0.6,
+    zoomScale: 1,
     tutorialsEnabled: true,
   };
   private tipArsenal: ArsenalSystem | null = null;
@@ -216,20 +229,26 @@ export class DomUI {
     this.optionsEl = this.mk('div', 'fs-overlay options-overlay hidden interactive');
     this.bannerEl = this.mk('div', 'fs-banner hidden');
     this.eventHudEl = this.mk('div', 'fs-event-hud hidden');
-    this.campHurtEl = this.mk('div', 'fs-camp-hurt');
+    this.playerHurtEl = this.mk('div', 'fs-player-hurt');
+    this.hudBottomEl = this.mk('div', 'fs-hud-bottom');
+    this.hudCornerEl = this.mk('div', 'fs-hud-corner');
+    this.campStatusEl = this.mk('div', 'fs-camp-status');
+    this.campStatusEl.innerHTML = `
+      <span class="fs-camp-status-ico">${ICONS.house}</span>
+      <span class="fs-camp-status-label" id="camp-status-label">Camp Status</span>
+    `;
     this.bossHudEl = this.mk('div', 'fs-boss-hud hidden');
     this.buffHudEl = this.mk('div', 'fs-buff-hud');
     root.append(
       this.hudEl,
-      this.buffHudEl,
-      this.gearHudEl,
-      this.loadoutEl,
+      this.hudBottomEl,
+      this.hudCornerEl,
       this.watermarkEl,
       this.tipPopEl,
       this.campPanelEl,
       this.bannerEl,
       this.eventHudEl,
-      this.campHurtEl,
+      this.playerHurtEl,
       this.bossHudEl,
       this.pauseEl,
       this.cardsEl,
@@ -264,43 +283,8 @@ export class DomUI {
   }
 
   private buildHud() {
+    // Top chrome: action buttons only (right-aligned via CSS).
     this.hudEl.innerHTML = `
-      <div class="fs-hud-left">
-        <div class="fs-panel fs-status" data-coach="status">
-          <div class="fs-level-badge" id="hud-lvl" title="Player level" data-coach="xp">1</div>
-          <div class="fs-status-bars" data-coach="xp">
-            <div class="fs-bar-row">
-              <span class="fs-ico" title="Health">${ICONS.heart}</span>
-              <div class="fs-track" id="hud-hp-bar"><span style="width:100%"></span><em id="hud-hp-text">100/100</em></div>
-            </div>
-            <div class="fs-bar-row">
-              <span class="fs-ico" title="Camp health">${ICONS.house}</span>
-              <div class="fs-track camp" id="hud-camp-bar"><span style="width:100%"></span><em id="hud-camp-text">300/300</em></div>
-            </div>
-            <div class="fs-xp" id="hud-xp-bar" title="Experience"><span style="width:0%"></span></div>
-          </div>
-        </div>
-      </div>
-      <div class="fs-panel fs-resources" data-coach="resources">
-        <div class="fs-res" title="Wood"><span class="fs-ico">${ICONS.wood}</span><strong id="hud-wood">0</strong></div>
-        <div class="fs-res" title="Meat"><span class="fs-ico">${ICONS.meat}</span><strong id="hud-meat">0</strong></div>
-        <div class="fs-res" title="Gold"><span class="fs-ico">${ICONS.gold}</span><strong id="hud-gold">0</strong></div>
-      </div>
-      <div class="fs-panel fs-mutator-hud hidden" id="hud-mutators" title="Active mutators"></div>
-      <div class="fs-panel fs-time" title="Day / night cycle" data-coach="time">
-        <div class="fs-clock-top">
-          <span class="fs-ico fs-clock-ico" id="hud-phase-ico">${ICONS.sun}</span>
-          <b id="hud-day">Day 1</b>
-          <span id="hud-threat" data-coach="threat">Threat x1.0</span>
-        </div>
-        <div class="fs-daybar"><span id="hud-dayfill" style="width:20%"></span></div>
-        <div class="fs-clock-sub" id="hud-clock">05:00 · Day</div>
-      </div>
-      <div class="fs-panel fs-fps-panel" title="Run time and FPS">
-        <span id="hud-run-timer">0:00</span>
-        <span class="fs-fps-sep">·</span>
-        <span id="hud-fps">60</span> FPS
-      </div>
       <div class="fs-panel fs-hud-btns interactive">
         <button type="button" class="fs-btn icon" id="btn-camp-toggle" data-coach="campBtn" title="Camp upgrades (U / B)">${ICONS.up}</button>
         <button type="button" class="fs-btn icon" id="btn-pause" title="Pause (P / Esc)">${ICONS.pause}</button>
@@ -316,8 +300,65 @@ export class DomUI {
       this.refreshMuteBtn();
     });
     this.refreshMuteBtn();
-    // Buffs live under the HP/XP panel so they clear it at any UI scale.
-    this.hudEl.querySelector('.fs-hud-left')?.appendChild(this.buffHudEl);
+
+    // Bottom bar: buffs above HP, then status | camp attack cue | resources.
+    this.hudBottomEl.innerHTML = `
+      <div class="fs-hud-bottom-col">
+        <div class="fs-hud-bottom-buffs"></div>
+        <div class="fs-hud-bottom-main">
+          <div class="fs-panel fs-status" data-coach="status">
+            <div class="fs-level-badge" id="hud-lvl" title="Player level" data-coach="xp">1</div>
+            <div class="fs-status-bars" data-coach="xp">
+              <div class="fs-bar-row">
+                <span class="fs-ico" title="Health">${ICONS.heart}</span>
+                <div class="fs-track" id="hud-hp-bar"><span style="width:100%"></span><em id="hud-hp-text">100/100</em></div>
+              </div>
+              <div class="fs-bar-row">
+                <span class="fs-ico" title="Camp health">${ICONS.house}</span>
+                <div class="fs-track camp" id="hud-camp-bar"><span style="width:100%"></span><em id="hud-camp-text">300/300</em></div>
+              </div>
+              <div class="fs-xp" id="hud-xp-bar" title="Experience"><span style="width:0%"></span></div>
+            </div>
+          </div>
+          <div class="fs-hud-bottom-side">
+            <div class="fs-hud-bottom-camp"></div>
+            <div class="fs-panel fs-resources" data-coach="resources">
+              <div class="fs-res" title="Wood"><span class="fs-ico">${ICONS.wood}</span><strong id="hud-wood">0</strong></div>
+              <div class="fs-res" title="Meat"><span class="fs-ico">${ICONS.meat}</span><strong id="hud-meat">0</strong></div>
+              <div class="fs-res" title="Gold"><span class="fs-ico">${ICONS.gold}</span><strong id="hud-gold">0</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    this.hudBottomEl.querySelector('.fs-hud-bottom-buffs')?.appendChild(this.buffHudEl);
+    this.hudBottomEl.querySelector('.fs-hud-bottom-camp')?.appendChild(this.campStatusEl);
+
+    // Bottom-left: weapons/gear above; day · timer · mutators in one row.
+    this.hudCornerEl.innerHTML = `
+      <div class="fs-hud-corner-load"></div>
+      <div class="fs-hud-corner-gear"></div>
+      <div class="fs-hud-corner-meta">
+        <div class="fs-panel fs-time" title="Day / night cycle" data-coach="time">
+          <div class="fs-clock-top">
+            <span class="fs-ico fs-clock-ico" id="hud-phase-ico">${ICONS.sun}</span>
+            <b id="hud-day">Day 1</b>
+            <span id="hud-threat" data-coach="threat">Threat x1.0</span>
+          </div>
+          <div class="fs-daybar"><span id="hud-dayfill" style="width:20%"></span></div>
+          <div class="fs-clock-sub" id="hud-clock">05:00 · Day</div>
+        </div>
+        <div class="fs-panel fs-fps-panel" title="Run time and FPS">
+          <span id="hud-run-timer">0:00</span>
+          <span class="fs-fps-sep">·</span>
+          <span id="hud-fps">60</span> FPS
+        </div>
+        <div class="fs-panel fs-mutator-hud hidden" id="hud-mutators" title="Active mutators"></div>
+      </div>
+    `;
+    this.hudCornerEl.querySelector('.fs-hud-corner-load')?.appendChild(this.loadoutEl);
+    this.hudCornerEl.querySelector('.fs-hud-corner-gear')?.appendChild(this.gearHudEl);
+
     this.bossHudEl.innerHTML = `<div class="fs-boss-row" id="boss-row"></div>`;
     this.bossHudStructKey = '';
     this.bannerEl.innerHTML = `
@@ -339,18 +380,48 @@ export class DomUI {
     if (btn) btn.innerHTML = Audio.muted ? ICONS.mute : ICONS.sound;
   }
 
-  /** Soft red edge vignette when the cabin or a palisade takes a hit. */
-  flashCampHurt() {
-    const el = this.campHurtEl;
+  /** Panel shake + red flash when cabin / palisade takes a hit (throttled by CampSystem). */
+  pulseCampStatus() {
+    if (this.noCampMode) return;
+    const el = this.campStatusEl;
+    const label = el.querySelector('#camp-status-label');
+    if (label) label.textContent = 'Under Attack!';
+    el.classList.remove('pulse');
+    void el.offsetWidth;
+    el.classList.add('pulse');
+    if (this.campStatusTimer) clearTimeout(this.campStatusTimer);
+    this.campStatusTimer = setTimeout(() => {
+      el.classList.remove('pulse');
+      if (label) label.textContent = 'Camp Status';
+      this.campStatusTimer = null;
+    }, 450);
+  }
+
+  /** Soft edge vignette on player damage only. */
+  flashPlayerHurt() {
+    const el = this.playerHurtEl;
     el.classList.remove('flash');
-    // Restart CSS animation.
     void el.offsetWidth;
     el.classList.add('flash');
-    if (this.campHurtTimer) clearTimeout(this.campHurtTimer);
-    this.campHurtTimer = setTimeout(() => {
+    if (this.playerHurtTimer) clearTimeout(this.playerHurtTimer);
+    this.playerHurtTimer = setTimeout(() => {
       el.classList.remove('flash');
-      this.campHurtTimer = null;
-    }, 500);
+      this.playerHurtTimer = null;
+    }, 320);
+  }
+
+  /** Brief red pulse on the player HP track. */
+  pulsePlayerHp() {
+    const bar = document.getElementById('hud-hp-bar');
+    if (!bar) return;
+    bar.classList.remove('hurt-pulse');
+    void bar.offsetWidth;
+    bar.classList.add('hurt-pulse');
+    if (this.hpPulseTimer) clearTimeout(this.hpPulseTimer);
+    this.hpPulseTimer = setTimeout(() => {
+      bar.classList.remove('hurt-pulse');
+      this.hpPulseTimer = null;
+    }, 350);
   }
 
   /** Legacy-style center banner (day / raid / assault announcements). */
@@ -382,8 +453,56 @@ export class DomUI {
       else subEl.textContent = sub;
     }
     this.bannerEl.classList.remove('hidden');
-    if (this.bannerTimer) clearTimeout(this.bannerTimer);
-    this.bannerTimer = setTimeout(() => this.bannerEl.classList.add('hidden'), 4200);
+    this.bannerRemainingMs = DomUI.BANNER_DURATION_MS;
+    // Character sheet open — show banner behind it but don't start the expiry clock yet.
+    if (!this.pauseEl.classList.contains('hidden')) {
+      this.clearBannerTimer();
+      this.bannerTimerPaused = true;
+      return;
+    }
+    this.armBannerTimer(this.bannerRemainingMs);
+  }
+
+  private clearBannerTimer() {
+    if (this.bannerTimer) {
+      clearTimeout(this.bannerTimer);
+      this.bannerTimer = null;
+    }
+  }
+
+  private armBannerTimer(ms: number) {
+    this.clearBannerTimer();
+    this.bannerTimerPaused = false;
+    this.bannerRemainingMs = Math.max(0, ms);
+    if (this.bannerRemainingMs <= 0) {
+      this.bannerEl.classList.add('hidden');
+      return;
+    }
+    this.bannerHideAt = performance.now() + this.bannerRemainingMs;
+    this.bannerTimer = setTimeout(() => {
+      this.bannerTimer = null;
+      this.bannerRemainingMs = 0;
+      this.bannerEl.classList.add('hidden');
+    }, this.bannerRemainingMs);
+  }
+
+  /** Freeze banner expiry while the character sheet is open. */
+  private pauseBannerTimer() {
+    if (this.bannerEl.classList.contains('hidden')) return;
+    if (this.bannerTimerPaused) return;
+    if (this.bannerTimer) {
+      this.bannerRemainingMs = Math.max(0, this.bannerHideAt - performance.now());
+      this.clearBannerTimer();
+    }
+    this.bannerTimerPaused = true;
+  }
+
+  /** Resume banner expiry after the character sheet closes. */
+  private resumeBannerTimer() {
+    if (!this.bannerTimerPaused) return;
+    this.bannerTimerPaused = false;
+    if (this.bannerEl.classList.contains('hidden')) return;
+    this.armBannerTimer(this.bannerRemainingMs > 0 ? this.bannerRemainingMs : DomUI.BANNER_DURATION_MS);
   }
 
   /** Species pills with glossary animal art for raid / assault telegraphs. */
@@ -642,9 +761,12 @@ export class DomUI {
     this.noCampMode = on;
     const campRow = document.getElementById('hud-camp-bar')?.closest('.fs-bar-row') as HTMLElement | null;
     campRow?.classList.toggle('hidden', on);
+    this.campStatusEl.classList.toggle('hidden', on);
+    const campSlot = this.hudBottomEl.querySelector('.fs-hud-bottom-camp') as HTMLElement | null;
+    campSlot?.classList.toggle('hidden', on);
     const campBtn = this.hudEl.querySelector('#btn-camp-toggle') as HTMLElement | null;
     campBtn?.classList.toggle('hidden', on);
-    const resPanel = this.hudEl.querySelector('.fs-resources') as HTMLElement | null;
+    const resPanel = this.hudBottomEl.querySelector('.fs-resources') as HTMLElement | null;
     resPanel?.classList.toggle('hidden', on);
     if (on) {
       this.hideCampPanel();
@@ -1931,7 +2053,7 @@ export class DomUI {
           name: 'Opening grace',
           tag: `${START_GRACE}s`,
           icon: 'world_grace',
-          desc: `At run start, wildlife ignores you and the camp for ${START_GRACE}s unless you strike first (provoked beasts fight back). Daytime assault waves and boss spawns are held until grace ends.`,
+          desc: `At run start, wildlife ignores you and the camp for ${START_GRACE}s unless you strike first (provoked beasts fight back). Daytime assault waves are held until grace ends; bosses unlock after 1 minute.`,
           stats: this.glossaryStat('Duration', `${START_GRACE}s`),
         }),
         this.glossarySimpleCard({
@@ -1956,7 +2078,7 @@ export class DomUI {
           name: 'Day champions',
           tag: 'Boss',
           icon: 'world_champions',
-          desc: 'Killing wildlife can awaken a daytime champion of that species — a tough day-boss that marches on the camp. Chance rises with stars, species, and day number. Disabled during grace.',
+          desc: 'Killing wildlife can awaken a daytime champion of that species — a tough day-boss that marches on the camp. Chance rises with stars, species, and day number. Champions and night bosses unlock after the first minute of the run.',
         }),
         this.glossarySimpleCard({
           name: 'Rising threat',
@@ -2059,9 +2181,9 @@ export class DomUI {
               <input id="opt-vsync" type="checkbox" />
               VSync (cap to display refresh)
             </label>
-            <label class="fs-opt-label" for="opt-zoom">Camera zoom <span id="opt-zoom-pct">60%</span></label>
-            <input id="opt-zoom" class="fs-opt-slider" type="range" min="30" max="60" step="5" />
-            <p class="fs-opt-hint">60% = default view. Lower zooms out further (cannot zoom in past 60%).</p>
+            <label class="fs-opt-label" for="opt-zoom">Camera zoom <span id="opt-zoom-pct">100%</span></label>
+            <input id="opt-zoom" class="fs-opt-slider" type="range" min="50" max="150" step="5" />
+            <p class="fs-opt-hint">100% = default view. Lower zooms out; higher zooms in (up to 150%).</p>
           </section>
           <section class="fs-opt-sec">
             <h3>Audio</h3>
@@ -2605,6 +2727,8 @@ export class DomUI {
   /** HUD / tips / loadout — hidden on the main menu, shown in-run. */
   private setRunChromeVisible(visible: boolean) {
     this.hudEl.classList.toggle('hidden', !visible);
+    this.hudBottomEl.classList.toggle('hidden', !visible);
+    this.hudCornerEl.classList.toggle('hidden', !visible);
     this.loadoutEl.classList.toggle('hidden', !visible);
     this.gearHudEl.classList.toggle('hidden', !visible);
     this.buffHudEl.classList.toggle('hidden', !visible);
@@ -3224,6 +3348,7 @@ export class DomUI {
     onResume: () => void,
     extra?: { camp?: CampSystem; day?: DayNightSystem; runTime?: number },
   ) {
+    this.pauseBannerTimer();
     this.pauseEl.classList.remove('hidden');
     const day = extra?.day;
     const camp = extra?.camp;
@@ -3354,6 +3479,7 @@ export class DomUI {
 
   hidePause() {
     this.pauseEl.classList.add('hidden');
+    this.resumeBannerTimer();
   }
 
   showLevelUpCards(

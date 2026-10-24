@@ -392,7 +392,7 @@ function hurt(
   player.invuln = 0.35;
   Audio.playSfx('hurt');
   onHurt?.();
-  onFloat?.(player.x + rand(-12, 12), player.y - 50, `-${Math.max(1, Math.round(dealt))}`, '#ff5a5f', 20);
+  onFloat?.(player.x + rand(-12, 12), player.y - 50, `-${Math.max(1, Math.round(dealt))}`, '#ff7075', 26);
   if (player.hp <= 0) {
     player.hp = 0;
     player.alive = false;

@@ -1,4 +1,5 @@
 import { clamp } from '../core/math';
+import { BASE_HALF } from './camp';
 
 export const WORLD_SIZE = 4800;
 /** Fixed seed used only for static previews / tooling — live runs use `randomWorldSeed()`. */
@@ -20,6 +21,10 @@ export const HIT_COOLDOWN = 0.3;
 export const MAX_PICKUPS = 160;
 /** Opening calm — wildlife won't hunt the player until struck or the timer ends. */
 export const START_GRACE = 30;
+/** Bosses (day champions, night mini/true) unlock after this many seconds of run time. */
+export const BOSS_SPAWN_UNLOCK = 60;
+/** Ground loot cannot be magneted/picked until this age (vacuum + nuke bypass). */
+export const PICKUP_DELAY = 0.7;
 export const WEAPON_MAX = 8;
 export const MAX_WEAPONS = 5;
 export const STAR_MAX = 15;
@@ -222,8 +227,11 @@ export function computeStats(L: Record<string, number>, meta: Record<string, num
     warmEmbersMul,
     guardianFlameDr: 0.04 * (L.guardian_flame || 0),
     eternalFire: (L.eternal_fire || 0) > 0,
-    /** Expanded heal radius for Eternal Fire (beyond yard). */
-    eternalHealR: 220 + 40 * (L.campfire || 0),
+    /**
+     * Eternal Fire half-heal radius from camp center (must clear the yard).
+     * Yard is BASE_HALF; ring extends further so "outside the walls" still heals.
+     */
+    eternalHealR: BASE_HALF + 160 + 35 * (L.campfire || 0),
     lightR: 250 + 28 * L.campfire,
     millYieldMul,
     mineYieldMul,

@@ -32,8 +32,14 @@ export function drawPlayer(ctx: Ctx, p: PlayerDrawState) {
     const t = Math.min((p.deathT || 0) * 2.5, 1);
     const ease = 1 - Math.pow(1 - t, 3);
     ctx.rotate(-p.facing * ease * Math.PI * 0.48);
-  } else if (p.invuln > 0 && Math.floor(p.invuln * 16) % 2 === 0) {
-    ctx.globalAlpha = 0.55;
+  } else if (p.invuln > 0) {
+    // Faster, deeper blink for the full i-frame window so hits read clearly.
+    const blinkOn = Math.floor(p.invuln * 22) % 2 === 0;
+    ctx.globalAlpha = blinkOn ? 0.28 : 1;
+    if (!blinkOn) {
+      ctx.shadowColor = 'rgba(255, 240, 230, 0.95)';
+      ctx.shadowBlur = 10;
+    }
   }
   ctx.scale(p.facing, 1);
   ctx.lineCap = 'round';

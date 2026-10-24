@@ -99,7 +99,6 @@ export class EdgeIndicatorSystem {
       }
     };
 
-    let shown = 0;
     for (const a of animals) {
       if (a.dead) continue;
       if (a.trueBoss) {
@@ -108,11 +107,6 @@ export class EdgeIndicatorSystem {
       }
       if (a.boss) {
         marker(a.x, a.y, 0xc46bff, 12, a.displayName || 'Boss');
-        continue;
-      }
-      if (a.raider) {
-        marker(a.x, a.y, 0xff5a4d, 9);
-        if (++shown >= 14) break;
       }
     }
     if (showCamp) marker(campX, campY - 40, 0xffd23f, 13, 'Camp');

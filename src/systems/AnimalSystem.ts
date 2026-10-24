@@ -20,6 +20,8 @@ import { Audio } from '../audio/Audio';
 import {
   ELEMENTS,
   RAID_DISTANCE,
+  BOSS_SPAWN_UNLOCK,
+  STAR_LOOT,
   rollStars,
   rollEnemyElement,
   starMult,
@@ -29,7 +31,6 @@ import {
 import { clamp, dist2, rand, compactInPlace, TAU } from '../core/math';
 import { tickDots, type DotStack } from '../core/dot';
 import { cameraWorldBounds } from '../core/renderScale';
-import { STAR_LOOT } from '../data/constants';
 import type { RunPlayer, Pickup, FirePool } from '../run/RunTypes';
 import type { CombatSystem } from './CombatSystem';
 import type { CampSystem, WallSeg } from './CampSystem';
@@ -718,6 +719,7 @@ export class AnimalSystem {
     worldH: number,
     raidAngles?: number[],
   ) {
+    if (!this.canSpawnBosses()) return 0;
     const n = dayNumber >= 7 ? 2 : 1;
     this.ensureSpawnSlots(n + 2, { x: campX, y: campY });
     const kinds: SpeciesId[] =
@@ -766,6 +768,7 @@ export class AnimalSystem {
     worldH: number,
     raidAngle?: number,
   ) {
+    if (!this.canSpawnBosses()) return null;
     this.ensureSpawnSlots(3, { x: campX, y: campY });
     const kinds: SpeciesId[] =
       dayNumber <= 3 ? ['boar', 'wolf', 'dire_boar', 'dire_wolf']
@@ -832,7 +835,7 @@ export class AnimalSystem {
 
   /** Daytime champion — spawn well outside the kill / camp (legacy spawnDayBoss). */
   spawnDayBoss(species: SpeciesId, nearX: number, nearY: number, dayNumber: number, threatM: number) {
-    if (this.graceLeft > 0) return;
+    if (!this.canSpawnBosses()) return;
     if (this.hasBossOfType(species)) return;
     const spot =
       this.findEnemySpawn(nearX, nearY, 280, 520, 36) ||
@@ -859,7 +862,7 @@ export class AnimalSystem {
   }
 
   tryDayBossFromKill(a: AnimalEntity, ctx: KillContext) {
-    if (this.graceLeft > 0) return;
+    if (!this.canSpawnBosses()) return;
     if (ctx.isNight || a.boss || a.raider || a.dayBoss) return;
     let kind: SpeciesId = a.species;
     if (!DAY_BOSS_SPECIES.includes(kind)) {
@@ -1103,9 +1106,9 @@ export class AnimalSystem {
       player.x + rand(-12, 12),
       player.y - 50,
       `-${Math.max(1, Math.round(dealt))}`,
-      '#ff5a5f',
-      20,
-      { life: 0.9, vx: rand(-20, 20) },
+      '#ff7075',
+      26,
+      { life: 0.95, vx: rand(-20, 20), vy: -36 },
     );
     // Legacy Player.damage → ps.thorns flat reflect on nearby beasts.
     if ((player.thorns || 0) > 0) this.combat?.applyThorns(player);
@@ -1170,6 +1173,8 @@ export class AnimalSystem {
       Audio.playSfx(a.boss ? 'roar' : 'boarDie');
       // Legacy onAnimalKilled shake — routed through Combat so Options shakeScale applies.
       this.combat?.onShake?.(a.boss ? 0.7 : a.big || isBearish(a.species) ? 0.4 : 0.26);
+      const poofScale = a.boss ? 1.85 : a.big || isBearish(a.species) ? 1.35 : 1;
+      this.vfx?.deathPoof(a.x, a.y - a.radius * 0.6, poofScale);
     }
     const sp = SPECIES[a.species];
     const stars = a.stars || 0;
@@ -1413,9 +1418,9 @@ export class AnimalSystem {
           player.x + rand(-12, 12),
           player.y - 50,
           `-${Math.max(1, Math.round(dealt))}`,
-          '#ff5a5f',
-          20,
-          { life: 0.9, vx: rand(-20, 20) },
+          '#ff7075',
+          26,
+          { life: 0.95, vx: rand(-20, 20), vy: -36 },
         );
         if (player.hp <= 0) {
           player.hp = 0;
@@ -1459,6 +1464,13 @@ export class AnimalSystem {
 
   /** Seconds left in start-of-run calm (wildlife won't hunt unless provoked). */
   graceLeft = 0;
+  /** Run clock — bosses unlock after BOSS_SPAWN_UNLOCK seconds. */
+  runAge = 0;
+
+  /** Day champions + night mini/true bosses. */
+  canSpawnBosses() {
+    return this.runAge >= BOSS_SPAWN_UNLOCK && this.graceLeft <= 0;
+  }
 
   update(
     dt: number,
@@ -1469,8 +1481,10 @@ export class AnimalSystem {
     isNight: boolean,
     dayNumber: number,
     graceLeft = 0,
+    runAge = 0,
   ) {
     this.graceLeft = Math.max(0, graceLeft);
+    this.runAge = Math.max(0, runAge);
     const ctx: KillContext = { isNight, dayNumber, threatM };
 
     // Legacy spawn cadence ~1.6s. Hold ambient/swarms while a night raid owns the field.
@@ -2006,9 +2020,9 @@ export class AnimalSystem {
           player.x + rand(-12, 12),
           player.y - 50,
           `-${Math.max(1, Math.round(dealt))}`,
-          '#ff5a5f',
-          20,
-          { life: 0.9, vx: rand(-20, 20) },
+          '#ff7075',
+          26,
+          { life: 0.95, vx: rand(-20, 20), vy: -36 },
         );
         if (player.hp <= 0) {
           player.hp = 0;

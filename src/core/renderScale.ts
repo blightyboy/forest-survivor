@@ -1,6 +1,6 @@
 import type Phaser from 'phaser';
 import { clamp } from './math';
-import { settings } from '../meta/Settings';
+import { settings, ZOOM_SCALE_DEFAULT, ZOOM_VIEW_BASE } from '../meta/Settings';
 
 /** Cap like legacy MAX_DPR — sharper than 1× CSS, without crushing FPS on 3× displays. */
 export const MAX_DPR = 1.5;
@@ -25,13 +25,13 @@ export function adaptiveZoom(cssW: number, cssH: number) {
 }
 
 /**
- * Phaser camera zoom = adaptive × DPR × user zoomScale.
+ * Phaser camera zoom = adaptive × DPR × ZOOM_VIEW_BASE × relative zoomScale.
  * World units stay CSS-pixel sized while the HiDPI buffer stays sharp.
- * `zoomScale` default/max is 0.6; lower values zoom further out.
+ * `zoomScale` is relative: 1 = default view (legacy 60%), above 1 zooms in.
  */
 export function cameraZoom(cssW: number, cssH: number) {
-  const user = Number.isFinite(settings.zoomScale) ? settings.zoomScale : 0.6;
-  return adaptiveZoom(cssW, cssH) * deviceDpr() * user;
+  const user = Number.isFinite(settings.zoomScale) ? settings.zoomScale : ZOOM_SCALE_DEFAULT;
+  return adaptiveZoom(cssW, cssH) * deviceDpr() * ZOOM_VIEW_BASE * user;
 }
 
 /**

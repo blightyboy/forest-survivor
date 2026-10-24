@@ -184,6 +184,8 @@ export class CampSystem {
   /** Fired when a true boss spawns (move telegraph — ability ids). */
   onTrueBossSpawn?: (name: string, moves: string[]) => void;
   healFx = 0;
+  /** Accumulated Eternal Fire outside heal between float ticks. */
+  private eternalHealAcc = 0;
   onCampAttack?: () => void;
   /** Fired (throttled) whenever the cabin or a palisade takes damage. */
   onStructureHit?: () => void;
@@ -886,7 +888,8 @@ export class CampSystem {
     player?: { x: number; y: number },
   ) {
     if (this.nightBossSpawned) return;
-    if (graceLeft > 0) return;
+    // Held until start grace ends and the 1-minute boss unlock.
+    if (graceLeft > 0 || !animals.canSpawnBosses()) return;
     const dayNumber = this.assaultNight || 1;
     const ww = animals.worldSize.w;
     const wh = animals.worldSize.h;
@@ -1075,24 +1078,44 @@ export class CampSystem {
       if (this.shopRefreshIn <= 0) this.restockShop(true);
     }
 
-    // Campfire heal: full rate in yard; Eternal Fire = half rate in expanded ring.
+    // Campfire heal: full rate in yard; Eternal Fire = half rate outside walls in expanded ring.
     if (player.alive && s.healRate > 0 && player.hp < player.maxHp) {
       const inYard = this.contains(player.x, player.y);
       let rate = 0;
+      let eternalHalf = false;
       if (inYard) {
         rate = s.healRate;
       } else if (s.eternalFire) {
-        const d2 = dist2(player.x, player.y, this.x, this.y + 70);
-        const r = s.eternalHealR || 260;
-        if (d2 < r * r) rate = s.healRate * 0.5;
+        // Distance from camp center (same origin as contains / yard), not the fire pit offset.
+        const d2 = dist2(player.x, player.y, this.x, this.y);
+        const r = s.eternalHealR || BASE_HALF + 200;
+        if (d2 < r * r) {
+          rate = s.healRate * 0.5;
+          eternalHalf = true;
+        }
       }
       if (rate > 0) {
+        const before = player.hp;
         player.hp = Math.min(player.maxHp, player.hp + rate * dt);
+        if (eternalHalf) this.eternalHealAcc += Math.max(0, player.hp - before);
         this.healFx -= dt;
         if (this.healFx <= 0) {
-          this.healFx = 0.35;
-          this.fx?.sparkle(player.x, player.y, '#9ef08a');
+          this.healFx = eternalHalf ? 0.55 : 0.35;
+          this.fx?.sparkle(player.x, player.y - 8, eternalHalf ? '#ffb347' : '#9ef08a');
+          // Show accumulated outside heal so half-rate is visible (was easy to miss).
+          if (eternalHalf && this.eternalHealAcc > 0.5) {
+            this.onFloatText?.(
+              player.x,
+              player.y - 42,
+              `+${Math.max(1, Math.round(this.eternalHealAcc))}`,
+              '#ffb347',
+              13,
+            );
+            this.eternalHealAcc = 0;
+          }
         }
+      } else {
+        this.eternalHealAcc = 0;
       }
     }
 

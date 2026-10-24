@@ -2,6 +2,26 @@
 
 All notable changes to Forest Survivor are documented here.
 
+## 0.2.9-alpha-build
+
+### HUD refactor
+- Main status strip moved to a **centered bottom bar** (60% width): level / HP / camp HP / XP, camp attack status, resources
+- Buffs/debuffs sit above the HP block; weapons + smith gear stack above the day/time strip (bottom-left)
+- Day / run timer / mutators sit in one horizontal row; boss cards use a transparent shell (no wood/gold frame)
+
+### Combat feedback
+- Camp structure hits pulse the Camp Status panel instead of a full-screen vignette
+- Player hurt package: longer flash, clearer i-frame blink, HP-bar pulse, player-only edge vignette, stronger damage floats, short hit-stop
+- Player character ~25% larger; projectiles scaled up for readability
+- Enemy deaths play a smoke poof + brief blood splatters
+
+### Gameplay
+- Ground loot waits **0.7s** before magnet/pickup (vacuum + nuke still instant)
+- Day champions and night mini/true bosses unlock after **60s** of run time
+- Camera zoom remapped: former 60% view is **100%**; slider **50%–150%**
+- Eternal Fire outside-walls half-heal fixed (radius from camp center; clearer heal FX)
+- Pause character sheet sits above banners and freezes banner expiry until resume
+
 ## 0.2.8-alpha-build
 
 ### Boss HUD

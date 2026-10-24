@@ -7,6 +7,8 @@ type Floater = {
   age: number;
   vx: number;
   vy: number;
+  /** Extra scale-pop for damage floats. */
+  pop?: boolean;
 };
 
 const MAX = 80;
@@ -32,14 +34,15 @@ export class FloatingTextSystem {
       const old = this.list.shift();
       old?.text.destroy();
     }
+    const isDamage = msg.startsWith('-');
     const text = this.layer.scene.add
       .text(x, y, msg, {
         fontFamily: '"Trebuchet MS", "Segoe UI", system-ui, sans-serif',
         fontSize: `${settings.textPx(size)}px`,
         fontStyle: '900',
         color,
-        stroke: 'rgba(30,15,5,0.9)',
-        strokeThickness: Math.max(3, settings.textPx(4)),
+        stroke: isDamage ? 'rgba(20,4,4,0.95)' : 'rgba(30,15,5,0.9)',
+        strokeThickness: Math.max(isDamage ? 5 : 3, settings.textPx(isDamage ? 5 : 4)),
       })
       .setOrigin(0.5)
       .setDepth(Math.floor(y) + 40);
@@ -50,6 +53,7 @@ export class FloatingTextSystem {
       age: 0,
       vx: opts.vx ?? 0,
       vy: opts.vy ?? -28,
+      pop: isDamage,
     });
   }
 
@@ -61,7 +65,15 @@ export class FloatingTextSystem {
       t.text.y += t.vy * dt;
       const k = t.age / t.life;
       const alpha = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
-      const pop = t.age < 0.15 ? 0.5 + 0.5 * Math.min(1, t.age / 0.15) : 1;
+      let pop = 1;
+      if (t.pop) {
+        // Stronger scale-pop so damage floats separate from world clutter.
+        if (t.age < 0.08) pop = 0.35 + 0.9 * (t.age / 0.08);
+        else if (t.age < 0.18) pop = 1.25 - 0.25 * ((t.age - 0.08) / 0.1);
+        else pop = 1;
+      } else if (t.age < 0.15) {
+        pop = 0.5 + 0.5 * Math.min(1, t.age / 0.15);
+      }
       t.text.setAlpha(Math.max(0, alpha));
       t.text.setScale(pop);
       t.text.setDepth(Math.floor(t.text.y) + 40);
